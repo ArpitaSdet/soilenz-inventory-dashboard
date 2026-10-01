@@ -1,0 +1,26 @@
+{
+  "name": "soilenz-inventory-dashboard",
+  "version": "1.0.0",
+  "description": "ArkaShine Innovations – SoilENZ, Soil Sparsh & Soil Life Component Inventory & Machine Dispatch System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo 'No build step required'"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "inventory",
+    "dashboard",
+    "arkashine",
+    "soilenz",
+    "soil-sparsh",
+    "soil-life",
+    "agritech",
+    "sqlite",
+    "render"
+  ],
+  "author": "ArkaShine Innovations Private Limited",
+  "license": "ISC"
+}

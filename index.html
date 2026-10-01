@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArkaShine Innovations – SoilENZ Component Inventory Portal</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="top-header">
+  <div class="header-container">
+    <div class="brand-wrapper">
+      <div class="brand-logo-icon"><i class="fas fa-seedling" style="font-size:1.3rem;"></i></div>
+      <div class="brand-info">
+        <h1>ArkaShine Innovations <span class="brand-badge">Internal Ops</span></h1>
+        <div class="brand-sub">SoilENZ Component Inventory &amp; Machine Dispatch System | Bidar, Karnataka | CIN: U74999KA2021PTC144988</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-sound-toggle" class="btn-sound-toggle"><i class="fas fa-volume-up"></i> Sound: ON</button>
+      <button class="notif-bell-btn" onclick="openModal('modal-notifications-center')">
+        <i class="fas fa-bell"></i> Alerts
+        <span id="header-notif-count" class="notif-count-badge" style="display:none;">0</span>
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="openModal('modal-item-entry')">
+        <i class="fas fa-arrow-down" style="color:#15803d;"></i> Stock Entry (IN)
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="openModal('modal-item-exit')">
+        <i class="fas fa-arrow-up" style="color:#dc2626;"></i> Stock Exit (OUT)
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="openModal('modal-dispatch-machine')">
+        <i class="fas fa-truck-loading"></i> Dispatch Machine
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN -->
+<main class="main-wrapper">
+
+  <!-- KPIs -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-icon-box kpi-icon-green"><i class="fas fa-cubes"></i></div>
+      <div><div class="kpi-label">Total Components</div><div class="kpi-value" id="kpi-total-items">0</div><div class="kpi-hint" id="kpi-total-skus">component SKUs</div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon-box kpi-icon-green"><i class="fas fa-boxes-stacked"></i></div>
+      <div><div class="kpi-label">Total Stock Units</div><div class="kpi-value" id="kpi-total-qty">0</div><div class="kpi-hint">across all items</div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon-box kpi-icon-blue"><i class="fas fa-microchip"></i></div>
+      <div><div class="kpi-label">Machines Active</div><div class="kpi-value" id="kpi-active-machines">0</div><div class="kpi-hint">SoilSaathi &amp; SoilSparsh</div></div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-icon-box kpi-icon-green" style="background:#ecfdf5;color:#059669;"><i class="fas fa-route"></i></div>
+      <div><div class="kpi-label">Dispatched Machines</div><div class="kpi-value" id="kpi-dispatched">0</div><div class="kpi-hint">path details saved</div></div>
+    </div>
+    <div class="kpi-card" style="cursor:pointer;" onclick="openModal('modal-notifications-center')">
+      <div class="kpi-icon-box kpi-icon-red"><i class="fas fa-triangle-exclamation"></i></div>
+      <div><div class="kpi-label">Stock Alerts</div><div class="kpi-value" id="kpi-alerts" style="color:#dc2626;">0</div><div class="kpi-hint" id="kpi-alerts-sub">out of / low stock</div></div>
+    </div>
+  </section>
+
+  <!-- TABS NAV -->
+  <nav class="nav-tabs-wrapper">
+    <div class="tabs-list">
+      <button class="tab-btn active" data-tab="tab-inventory"><i class="fas fa-layer-group"></i> Component Inventory</button>
+      <button class="tab-btn" data-tab="tab-machines"><i class="fas fa-laptop-code"></i> Machines &amp; Assembly</button>
+      <button class="tab-btn" data-tab="tab-movements"><i class="fas fa-clock-rotate-left"></i> Traceability Ledger</button>
+      <button class="tab-btn" data-tab="tab-dispatches"><i class="fas fa-map-location-dot"></i> Dispatch Paths</button>
+      <button class="tab-btn" data-tab="tab-alerts"><i class="fas fa-bell"></i> Alerts <span id="tab-alert-badge" class="tab-badge" style="display:none;">0</span></button>
+    </div>
+    <div class="action-buttons-group">
+      <button class="btn btn-save btn-sm" onclick="saveAllDataSnapshot()" title="Save all data to server & create backup snapshot">
+        <i class="fas fa-floppy-disk"></i> Store All Data
+      </button>
+      <button class="btn btn-excel btn-sm" onclick="openModal('modal-upload-excel')" title="Upload Excel spreadsheet to add or update components">
+        <i class="fas fa-file-arrow-up"></i> Upload Excel (.xlsx)
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="exportCompleteExcel()" title="Download full Excel workbook with all sheets">
+        <i class="fas fa-file-excel"></i> Download Excel (.xlsx)
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="exportJSONBackup()"><i class="fas fa-download"></i> Backup JSON</button>
+      <button class="btn btn-outline btn-sm" onclick="openModal('modal-import-backup')"><i class="fas fa-upload"></i> Restore</button>
+    </div>
+  </nav>
+
+  <!-- TAB 1: COMPONENT INVENTORY -->
+  <div id="tab-inventory" class="tab-content active">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title"><i class="fas fa-list-check" style="color:#15803d;"></i> SoilENZ Component &amp; Parts Inventory</h2>
+          <p style="font-size:0.82rem;color:#64748b;margin-top:2px;">All components with purchase links, pricing, model/HSN numbers, vendor info, and stock status.</p>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="items-search" class="search-input" placeholder="&#xf002; Search name, SKU, model, vendor...">
+          <select id="items-category-filter" class="select-input">
+            <option value="ALL">All Categories</option>
+            <option>Fasteners &amp; Hardware</option>
+            <option>Sensors &amp; Probes</option>
+            <option>Microcontrollers &amp; SBCs</option>
+            <option>Electronics Modules</option>
+            <option>Cables &amp; Connectors</option>
+            <option>Power &amp; Battery</option>
+            <option>Power Supply &amp; Adapters</option>
+            <option>Motors &amp; Actuators</option>
+            <option>Displays &amp; Cameras</option>
+            <option>Lab &amp; Chemicals</option>
+            <option>Packaging &amp; Enclosures</option>
+            <option>Printing</option>
+            <option>Communication</option>
+            <option>3D Printing</option>
+            <option>Storage</option>
+            <option>Switches &amp; Controls</option>
+            <option>Office &amp; Misc</option>
+            <option>Components</option>
+          </select>
+          <select id="items-status-filter" class="select-input">
+            <option value="ALL">All Statuses</option>
+            <option value="In Stock">In Stock</option>
+            <option value="Low Stock">Low Stock</option>
+            <option value="Out of Stock">Out of Stock</option>
+          </select>
+          <div class="view-toggle">
+            <button class="view-toggle-btn active" id="view-table-btn" onclick="setView('table')" title="Table view"><i class="fas fa-table"></i></button>
+            <button class="view-toggle-btn" id="view-card-btn" onclick="setView('card')" title="Card view"><i class="fas fa-grip"></i></button>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="openModal('modal-upload-excel')" title="Upload Excel (.xlsx / .csv)">
+            <i class="fas fa-file-excel" style="color:#107c41;"></i> Upload Excel
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="openModal('modal-item-entry')">
+            <i class="fas fa-plus"></i> Add Component
+          </button>
+        </div>
+      </div>
+
+      <!-- PRODUCT SWITCHER: SoilENZ, Soil Sparsh, Soil Life -->
+      <div class="product-switcher-container">
+        <div class="product-switcher-label">
+          <i class="fas fa-layer-group" style="color:#15803d;"></i> Filter by Product System:
+        </div>
+        <div class="product-switcher-grid">
+          <div class="product-card-btn active" id="prod-btn-all" onclick="selectProductFilter('ALL')">
+            <div class="product-card-icon" style="background:#f1f5f9;color:#0f172a;"><i class="fas fa-boxes-stacked"></i></div>
+            <div class="product-card-info">
+              <h4>All Products</h4>
+              <p>SoilENZ, Sparsh &amp; Life</p>
+            </div>
+            <span class="product-card-count" id="count-prod-all">0</span>
+          </div>
+
+          <div class="product-card-btn" id="prod-btn-soilenz" onclick="selectProductFilter('SoilENZ')">
+            <div class="product-card-icon" style="background:#ecfdf5;color:#059669;"><i class="fas fa-seedling"></i></div>
+            <div class="product-card-info">
+              <h4>SoilENZ</h4>
+              <p>Enzymatic Soil Analysis</p>
+            </div>
+            <span class="product-card-count" id="count-prod-soilenz">0</span>
+          </div>
+
+          <div class="product-card-btn" id="prod-btn-soilsparsh" onclick="selectProductFilter('Soil Sparsh')">
+            <div class="product-card-icon" style="background:#eff6ff;color:#2563eb;"><i class="fas fa-bolt"></i></div>
+            <div class="product-card-info">
+              <h4>Soil Sparsh</h4>
+              <p>Rapid Multi-Sensor Analyzer</p>
+            </div>
+            <span class="product-card-count" id="count-prod-soilsparsh">0</span>
+          </div>
+
+          <div class="product-card-btn" id="prod-btn-soillife" onclick="selectProductFilter('Soil Life')">
+            <div class="product-card-icon" style="background:#faf5ff;color:#9333ea;"><i class="fas fa-dna"></i></div>
+            <div class="product-card-info">
+              <h4>Soil Life</h4>
+              <p>Microbial &amp; Biological Health</p>
+            </div>
+            <span class="product-card-count" id="count-prod-soillife">0</span>
+          </div>
+
+          <div class="product-card-btn" id="prod-btn-common" onclick="selectProductFilter('Common')">
+            <div class="product-card-icon" style="background:#f8fafc;color:#64748b;"><i class="fas fa-shapes"></i></div>
+            <div class="product-card-info">
+              <h4>Common Parts</h4>
+              <p>Shared Hardware &amp; SBCs</p>
+            </div>
+            <span class="product-card-count" id="count-prod-common">0</span>
+          </div>
+
+          <div class="product-card-btn" id="prod-btn-others" onclick="selectProductFilter('Others')">
+            <div class="product-card-icon" style="background:#fef3c7;color:#d97706;"><i class="fas fa-tag"></i></div>
+            <div class="product-card-info">
+              <h4>Others</h4>
+              <p>Custom / New Products</p>
+            </div>
+            <span class="product-card-count" id="count-prod-others">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABLE VIEW -->
+      <div id="inventory-table-view">
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Product Line</th>
+                <th>Component Name</th>
+                <th>Model No.</th>
+                <th>HSN No.</th>
+                <th>Category</th>
+                <th>Price (₹)</th>
+                <th>Stock / Qty / Unit</th>
+                <th>Qty/Machine</th>
+                <th>Status</th>
+                <th>Vendor</th>
+                <th>Purchase Link</th>
+                <th>Date of Purchase</th>
+                <th>Rack / Bin</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="items-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- CARD VIEW -->
+      <div id="inventory-card-view" style="display:none;">
+        <div id="comp-cards-container" class="comp-cards-grid"></div>
+      </div>
+
+      <div id="items-count-bar" style="font-size:0.78rem;color:#64748b;margin-top:10px;text-align:right;"></div>
+    </div>
+  </div>
+
+  <!-- TAB 2: MACHINES -->
+  <div id="tab-machines" class="tab-content">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title"><i class="fas fa-screwdriver-wrench" style="color:#15803d;"></i> Machine Units &amp; Assembly Hub</h2>
+          <p style="font-size:0.82rem;color:#64748b;margin-top:2px;">Manage SoilSaathi / SoilSparsh units, allocate components, and record dispatch paths.</p>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary btn-sm" onclick="openModal('modal-register-machine')"><i class="fas fa-plus-circle"></i> Register Machine</button>
+          <button class="btn btn-accent btn-sm" onclick="openModal('modal-dispatch-machine')"><i class="fas fa-paper-plane"></i> Dispatch</button>
+        </div>
+      </div>
+      <div id="machines-grid" class="machine-cards-grid"></div>
+    </div>
+  </div>
+
+  <!-- TAB 3: TRACEABILITY LEDGER -->
+  <div id="tab-movements" class="tab-content">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title"><i class="fas fa-history" style="color:#15803d;"></i> Entry &amp; Exit Traceability Ledger</h2>
+          <p style="font-size:0.82rem;color:#64748b;margin-top:2px;">Complete audit trail of every stock movement — inward, outward, machine allocation, and missing reports.</p>
+        </div>
+        <button class="btn btn-excel btn-sm" onclick="exportMovementsCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr><th>Tx ID</th><th>Date &amp; Time</th><th>Type</th><th>Component Name</th><th>Qty</th><th>Balance After</th><th>Reason / Machine Ref</th><th>Operator</th><th>Notes</th></tr>
+          </thead>
+          <tbody id="movements-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: DISPATCH PATHS -->
+  <div id="tab-dispatches" class="tab-content">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title"><i class="fas fa-truck-fast" style="color:#15803d;"></i> Dispatched Machines &amp; Saved Journey Paths</h2>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openModal('modal-dispatch-machine')"><i class="fas fa-plus"></i> New Dispatch</button>
+      </div>
+      <div id="dispatch-archive-container"></div>
+    </div>
+  </div>
+
+  <!-- TAB 5: ALERTS -->
+  <div id="tab-alerts" class="tab-content">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title"><i class="fas fa-bell-exclamation" style="color:#dc2626;"></i> Alerts &amp; Notification Center</h2>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="markAllNotificationsRead()"><i class="fas fa-check-double"></i> Mark All Read</button>
+      </div>
+      <div id="notifications-feed"></div>
+    </div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-content">
+    <div><strong>ArkaShine Innovations Private Limited</strong> | Bidar Agritech Hub | SoilSaathi™ &amp; SoilSparsh™</div>
+    <div>Status: <strong style="color:#4ade80;">Operational</strong> | Server: <strong id="server-mode-tag">Connecting...</strong></div>
+  </div>
+</footer>
+
+<!-- ================================================================
+  MODALS
+  ================================================================ -->
+
+<!-- MODAL 1: ADD / EDIT COMPONENT (Stock Entry) -->
+<div id="modal-item-entry" class="modal-overlay">
+  <div class="modal-box wide">
+    <div class="modal-header">
+      <h3><i class="fas fa-arrow-circle-down" style="color:#15803d;"></i> <span id="modal-entry-title">Add New Component / Stock Entry</span></h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <form id="form-item-entry" onsubmit="submitItemEntry(event)">
+      <input type="hidden" id="entry-edit-id" value="">
+      <div class="modal-body">
+
+        <!-- Component Info -->
+        <div class="form-section">
+          <div class="form-section-title"><i class="fas fa-layer-group"></i> 1. Product Line Assignment</div>
+          <div class="form-group" style="margin-bottom:18px;">
+            <label class="form-label" style="font-weight:700;color:#0f172a;font-size:0.84rem;">
+              Select Product this Part / Component belongs to: <span class="req">*</span>
+            </label>
+            <div class="product-radio-group">
+              <label class="product-radio-card selected" id="radio-card-soilenz">
+                <input type="radio" name="entry-product-radio" value="SoilENZ" checked onchange="onProductRadioChange('SoilENZ')">
+                <div class="product-radio-content">
+                  <strong>🌱 SoilENZ</strong>
+                  <span>Enzymatic &amp; Spectrophotometry Testing</span>
+                </div>
+              </label>
+              <label class="product-radio-card" id="radio-card-soilsparsh">
+                <input type="radio" name="entry-product-radio" value="Soil Sparsh" onchange="onProductRadioChange('Soil Sparsh')">
+                <div class="product-radio-content">
+                  <strong>⚡ Soil Sparsh</strong>
+                  <span>Rapid Multi-Sensor Field Analyzer</span>
+                </div>
+              </label>
+              <label class="product-radio-card" id="radio-card-soillife">
+                <input type="radio" name="entry-product-radio" value="Soil Life" onchange="onProductRadioChange('Soil Life')">
+                <div class="product-radio-content">
+                  <strong>🔬 Soil Life</strong>
+                  <span>Microbial &amp; Biological Diagnostics</span>
+                </div>
+              </label>
+              <label class="product-radio-card" id="radio-card-common">
+                <input type="radio" name="entry-product-radio" value="Common" onchange="onProductRadioChange('Common')">
+                <div class="product-radio-content">
+                  <strong>📦 Common Parts</strong>
+                  <span>Shared Hardware, Batteries, Cables</span>
+                </div>
+              </label>
+              <label class="product-radio-card" id="radio-card-others">
+                <input type="radio" name="entry-product-radio" value="Others" onchange="onProductRadioChange('Others')">
+                <div class="product-radio-content">
+                  <strong>🏷️ Others</strong>
+                  <span>Custom &amp; New Product Lines</span>
+                </div>
+              </label>
+            </div>
+            <input type="hidden" id="entry-item-product" value="SoilENZ">
+          </div>
+
+          <div class="form-section-title"><i class="fas fa-microchip"></i> 2. Component Details</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Component / Part Name <span class="req">*</span></label>
+              <input type="text" id="entry-item-name" class="form-control" placeholder="e.g. Raspberry Pi 4 Model B" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Category (Editable / Custom) <span class="req">*</span></label>
+              <input type="text" id="entry-item-category" class="form-control" list="category-datalist" placeholder="Select or type new category..." required>
+              <datalist id="category-datalist">
+                <option value="Fasteners &amp; Hardware">
+                <option value="Sensors &amp; Probes">
+                <option value="Microcontrollers &amp; SBCs">
+                <option value="Electronics Modules">
+                <option value="Cables &amp; Connectors">
+                <option value="Power &amp; Battery">
+                <option value="Power Supply &amp; Adapters">
+                <option value="Motors &amp; Actuators">
+                <option value="Displays &amp; Cameras">
+                <option value="Lab &amp; Chemicals">
+                <option value="Packaging &amp; Enclosures">
+                <option value="Printing">
+                <option value="Communication">
+                <option value="3D Printing">
+                <option value="Storage">
+                <option value="Switches &amp; Controls">
+                <option value="Office &amp; Misc">
+                <option value="Components">
+              </datalist>
+              <div class="form-hint">Type any custom category or choose from common suggestions.</div>
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label class="form-label">Model Number</label>
+              <input type="text" id="entry-item-model" class="form-control" placeholder="e.g. RPI-4B-4GB">
+            </div>
+            <div class="form-group">
+              <label class="form-label">HSN Number</label>
+              <input type="text" id="entry-item-hsn" class="form-control" placeholder="e.g. 8471">
+              <div class="form-hint">Harmonized System of Nomenclature code for GST/customs.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Part / Internal SKU</label>
+              <input type="text" id="entry-item-sku" class="form-control" placeholder="e.g. RPI-001">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Purchase Link / Product URL</label>
+            <div class="input-with-icon">
+              <input type="url" id="entry-item-link" class="form-control" placeholder="https://www.amazon.in/dp/...">
+              <button type="button" class="input-icon-btn" onclick="openLink('entry-item-link')" title="Open link"><i class="fas fa-external-link-alt"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pricing & Purchase -->
+        <div class="form-section">
+          <div class="form-section-title"><i class="fas fa-tag"></i> Pricing &amp; Purchase Info</div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label class="form-label">Unit Price (₹)</label>
+              <input type="number" id="entry-item-price" class="form-control" min="0" step="0.01" placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date of Purchase</label>
+              <input type="date" id="entry-item-purchase-date" class="form-control">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Batch / Lot Number</label>
+              <input type="text" id="entry-item-batch" class="form-control" placeholder="e.g. LOT-2026-09">
+            </div>
+          </div>
+        </div>
+
+        <!-- Stock -->
+        <div class="form-section">
+          <div class="form-section-title"><i class="fas fa-boxes-stacked"></i> Stock Information</div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label class="form-label">Quantity (Received) <span class="req">*</span></label>
+              <input type="number" id="entry-item-qty" class="form-control" min="0" value="0" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Unit of Measure</label>
+              <input type="text" id="entry-item-unit" class="form-control" value="Pcs" placeholder="Pcs, Kits, Rolls...">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Qty Required per Machine</label>
+              <input type="number" id="entry-item-qty-per-machine" class="form-control" min="0" placeholder="e.g. 2">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Min. Safety Threshold</label>
+              <input type="number" id="entry-item-threshold" class="form-control" value="5" min="0">
+              <div class="form-hint">Alert triggers when stock goes below this level.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Storage Rack / Bin Location</label>
+              <input type="text" id="entry-item-rack" class="form-control" placeholder="e.g. Bin A-04, Cold Shelf 2">
+            </div>
+          </div>
+        </div>
+
+        <!-- Vendor -->
+        <div class="form-section">
+          <div class="form-section-title"><i class="fas fa-store"></i> Vendor / Supplier Details</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Vendor / Supplier Name</label>
+              <input type="text" id="entry-vendor-name" class="form-control" placeholder="e.g. ROBU.IN / Amazon / Goutham Electronics">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Vendor Phone Number</label>
+              <input type="tel" id="entry-vendor-phone" class="form-control" placeholder="e.g. +91 98765 43210">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Vendor Address</label>
+            <input type="text" id="entry-vendor-address" class="form-control" placeholder="e.g. 12, Electronics Market, SP Road, Bengaluru - 560002">
+          </div>
+        </div>
+
+        <!-- Operator -->
+        <div class="form-section">
+          <div class="form-section-title"><i class="fas fa-user"></i> Entry Operator</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Received / Entered By</label>
+              <input type="text" id="entry-item-operator" class="form-control" value="Store Incharge">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Notes / Remarks</label>
+              <input type="text" id="entry-item-notes" class="form-control" placeholder="e.g. Sealed box, QA passed">
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span id="entry-submit-label">Save Component &amp; Stock</span></button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL 2: STOCK EXIT -->
+<div id="modal-item-exit" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3><i class="fas fa-arrow-circle-up" style="color:#dc2626;"></i> Stock Exit / Machine Allocation</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <form id="form-item-exit" onsubmit="submitItemExit(event)">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Select Component to Exit <span class="req">*</span></label>
+          <select id="exit-item-select" class="form-control" onchange="onExitItemSelected()" required>
+            <option value="">-- Choose a component --</option>
+          </select>
+          <div id="exit-stock-preview" style="font-size:0.8rem;margin-top:5px;color:#475569;"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Exit Quantity <span class="req">*</span></label>
+            <input type="number" id="exit-item-qty" class="form-control" min="1" value="1" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Exit Reason / Purpose <span class="req">*</span></label>
+            <select id="exit-item-reason" class="form-control" required>
+              <option value="Machine Allocation">Machine Allocation (SoilSaathi / SoilSparsh)</option>
+              <option value="R&D Lab Testing">R&amp;D Lab Testing / Calibration</option>
+              <option value="Customer Sample">Customer Demo / Sample</option>
+              <option value="Scrap / Damaged">Scrap / Damaged</option>
+              <option value="Missing / Discrepancy">Missing / Inventory Discrepancy</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Link to Machine (for Machine Allocation)</label>
+          <select id="exit-machine-ref" class="form-control"></select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Handled By (Operator)</label>
+            <input type="text" id="exit-item-operator" class="form-control" value="Assembly Engineer">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Exit Notes</label>
+            <input type="text" id="exit-item-notes" class="form-control" placeholder="e.g. Assembled to chassis unit">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-danger"><i class="fas fa-check"></i> Confirm Exit</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL 3: REGISTER MACHINE -->
+<div id="modal-register-machine" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3><i class="fas fa-microchip" style="color:#0284c7;"></i> Register New Machine</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <form id="form-register-machine" onsubmit="submitRegisterMachine(event)">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Machine Serial Number <span class="req">*</span></label>
+          <input type="text" id="reg-machine-serial" class="form-control" placeholder="e.g. SE-2026-045, SP-2026-088" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Product Line <span class="req">*</span></label>
+          <select id="reg-machine-product" class="form-control" onchange="onMachineProductSelected()">
+            <option value="SoilENZ">🌱 SoilENZ (Automated Testing System)</option>
+            <option value="Soil Sparsh">⚡ Soil Sparsh (Rapid Portable Analyzer)</option>
+            <option value="Soil Life">🔬 Soil Life (Microbial &amp; Biological Station)</option>
+            <option value="Others">🏷️ Others (Custom Line)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Machine Model Variant (Editable) <span class="req">*</span></label>
+          <input type="text" id="reg-machine-model" class="form-control" list="machine-model-datalist" placeholder="Select or type model variant..." required>
+          <datalist id="machine-model-datalist">
+            <option value="SoilENZ AI Automated Lab System V2">
+            <option value="SoilENZ Micro-Spectrophotometer Unit">
+            <option value="SoilENZ Lab-in-Backpack Testing Station">
+            <option value="Soil Sparsh Rapid Multi-Sensor Analyzer">
+            <option value="Soil Sparsh Handheld Field Diagnostic">
+            <option value="Soil Sparsh Compact NPK/pH/EC Kit">
+            <option value="Soil Life Bio-Activity &amp; Microbial Station">
+            <option value="Soil Life Soil Respiration Analyzer">
+            <option value="Soil Life Organic Carbon Optical Station">
+          </datalist>
+          <div class="form-hint">Type any custom model or select from standard models.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Assembly / Production Status <span class="req">*</span></label>
+          <select id="reg-machine-status" class="form-control" required>
+            <option value="In Assembly" selected>In Assembly (Work in Progress)</option>
+            <option value="Assembled">Assembled (Components Installed)</option>
+            <option value="Completed (Ready to Dispatch)">Completed (Ready to Dispatch)</option>
+            <option value="Under Testing / Calibration">Under Testing / Calibration</option>
+            <option value="Maintenance / QA Review">Maintenance / QA Review</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Register Machine</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL 3B: EDIT REGISTERED MACHINE -->
+<div id="modal-edit-machine" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3><i class="fas fa-pencil" style="color:#0284c7;"></i> <span id="modal-edit-machine-title">Edit Machine Unit</span></h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <form id="form-edit-machine" onsubmit="submitEditMachine(event)">
+      <input type="hidden" id="edit-machine-orig-serial" value="">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Machine Serial Number <span class="req">*</span></label>
+          <input type="text" id="edit-machine-serial" class="form-control" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Product Line <span class="req">*</span></label>
+          <select id="edit-machine-product" class="form-control">
+            <option value="SoilENZ">🌱 SoilENZ (Automated Testing System)</option>
+            <option value="Soil Sparsh">⚡ Soil Sparsh (Rapid Portable Analyzer)</option>
+            <option value="Soil Life">🔬 Soil Life (Microbial &amp; Biological Station)</option>
+            <option value="Others">🏷️ Others (Custom Line)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Machine Model Variant (Editable) <span class="req">*</span></label>
+          <input type="text" id="edit-machine-model" class="form-control" list="machine-model-datalist" placeholder="Select or type model..." required>
+          <div class="form-hint">Type any custom model name or choose from suggestions.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Assembly &amp; Dispatch Status <span class="req">*</span></label>
+          <select id="edit-machine-status" class="form-control" required>
+            <option value="In Assembly">In Assembly (Work in Progress)</option>
+            <option value="Assembled">Assembled (Components Installed)</option>
+            <option value="Completed (Ready to Dispatch)">Completed (Ready to Dispatch)</option>
+            <option value="Under Testing / Calibration">Under Testing / Calibration</option>
+            <option value="Maintenance / QA Review">Maintenance / QA Review</option>
+            <option value="Dispatched">Dispatched</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Registration Date</label>
+          <input type="date" id="edit-machine-date" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL 4: DISPATCH MACHINE & PATH -->
+<div id="modal-dispatch-machine" class="modal-overlay">
+  <div class="modal-box wide">
+    <div class="modal-header">
+      <h3><i class="fas fa-route" style="color:#15803d;"></i> Dispatch Machine &amp; Save Journey Path</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <form id="form-dispatch-machine" onsubmit="submitMachineDispatch(event)">
+      <div class="modal-body">
+        <div style="background:#ecfdf5;border:1px solid #a7f3d0;padding:10px;border-radius:6px;margin-bottom:14px;font-size:0.82rem;color:#065f46;">
+          <i class="fas fa-info-circle"></i> Dispatching a machine permanently saves its destination path, triggers an alert, and marks the unit as dispatched.
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Select Machine <span class="req">*</span></label>
+            <select id="dispatch-machine-select" class="form-control" required></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Dispatch Date <span class="req">*</span></label>
+            <input type="date" id="dispatch-date" class="form-control" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Destination / Consignee Name <span class="req">*</span></label>
+          <input type="text" id="dispatch-destination-name" class="form-control" placeholder="e.g. Agri Innovation Centre, UAS Bangalore" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Full Destination Address <span class="req">*</span></label>
+          <input type="text" id="dispatch-destination-address" class="form-control" placeholder="e.g. GKVK Campus, Bellary Road, Bangalore - 560065" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><i class="fas fa-map-signs" style="color:#15803d;"></i> Transit Route / Waypoint Path <span class="req">*</span></label>
+          <input type="text" id="dispatch-path-route" class="form-control" placeholder="e.g. Bidar R&D → Kalaburagi → NH44 → Bangalore GKVK" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Consignee Contact</label>
+            <input type="text" id="dispatch-consignee-contact" class="form-control" placeholder="Dr. Name - +91 9XXXXXXXX">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Transporter / Courier</label>
+            <input type="text" id="dispatch-transporter" class="form-control" placeholder="e.g. VRL Logistics">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Tracking Waybill / Docket No.</label>
+            <input type="text" id="dispatch-tracking-waybill" class="form-control" placeholder="e.g. VRL-BLR-892104">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Dispatched By</label>
+            <input type="text" id="dispatch-operator" class="form-control" value="Dispatch Supervisor">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dispatch Notes</label>
+          <input type="text" id="dispatch-notes" class="form-control" placeholder="e.g. Calibrated, QA passed, backpack included">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" data-close-modal><i class="fas fa-door-open"></i> Exit (Cancel)</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> Save &amp; Dispatch</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL 5: GATE PASS / CHALLAN -->
+<div id="modal-challan" class="modal-overlay">
+  <div class="modal-box" style="max-width:820px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-file-invoice" style="color:#15803d;"></i> Dispatch Gate Pass &amp; Delivery Challan</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <div class="modal-body" id="challan-printable-content"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" data-close-modal>Close</button>
+      <button type="button" class="btn btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print Gate Pass</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 6: NOTIFICATIONS CENTER -->
+<div id="modal-notifications-center" class="modal-overlay">
+  <div class="modal-box" style="max-width:600px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-bell" style="color:#15803d;"></i> Alerts &amp; Notification Center</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:65vh;">
+      <div id="modal-notifications-list"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" onclick="markAllNotificationsRead()">Mark All Read</button>
+      <button type="button" class="btn btn-primary" data-close-modal>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 7: COMPONENT DETAIL VIEW -->
+<div id="modal-component-detail" class="modal-overlay">
+  <div class="modal-box wide">
+    <div class="modal-header">
+      <h3 id="detail-modal-title"><i class="fas fa-info-circle" style="color:#15803d;"></i> Component Details</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <div class="modal-body" id="component-detail-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" data-close-modal>Close</button>
+      <button type="button" id="detail-edit-btn" class="btn btn-primary"><i class="fas fa-pencil"></i> Edit Component</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 8: RESTORE BACKUP -->
+<div id="modal-import-backup" class="modal-overlay">
+  <div class="modal-box" style="max-width:500px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-upload" style="color:#15803d;"></i> Restore / Import Database</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:0.86rem;color:#475569;margin-bottom:12px;">Select a previously exported JSON backup file to restore all inventory, machines, dispatches, and movements.</p>
+      <div class="form-group">
+        <label class="form-label">Choose Backup JSON File</label>
+        <input type="file" id="import-file-input" class="form-control" accept=".json">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="handleImportFile()"><i class="fas fa-file-import"></i> Restore Data</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL 9: UPLOAD EXCEL (.XLSX / .CSV) -->
+<div id="modal-upload-excel" class="modal-overlay">
+  <div class="modal-box" style="max-width:640px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-file-excel" style="color:#107c41;"></i> Upload Excel Inventory Spreadsheet</h3>
+      <button class="modal-close-btn" data-close-modal>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="excel-dropzone" id="excel-dropzone" onclick="document.getElementById('excel-file-input').click()">
+        <i class="fas fa-file-arrow-up"></i>
+        <h4>Drop your Excel (.xlsx, .xls, .csv) here</h4>
+        <p>Or click to select an inventory file from your computer</p>
+        <div style="margin-top:12px;">
+          <span class="btn btn-outline btn-sm"><i class="fas fa-folder-open"></i> Browse Computer</span>
+        </div>
+        <input type="file" id="excel-file-input" style="display:none;" accept=".xlsx, .xls, .csv" onchange="handleExcelUpload(event)">
+      </div>
+
+      <div class="form-group" style="margin-bottom:14px;">
+        <label class="form-label" style="font-weight:700;color:#0f172a;"><i class="fas fa-layer-group" style="color:#107c41;"></i> Assign Uploaded Components to Product Line:</label>
+        <select id="excel-target-product" class="form-control">
+          <option value="AUTO">Auto-detect from file (reads 'Product' or 'System' column)</option>
+          <option value="SoilENZ">🌱 SoilENZ (Enzyme &amp; Spectrophotometry)</option>
+          <option value="Soil Sparsh">⚡ Soil Sparsh (Rapid Multi-Sensor Analyzer)</option>
+          <option value="Soil Life">🔬 Soil Life (Microbial &amp; Biological Health)</option>
+          <option value="Common">📦 Common / Shared Components</option>
+        </select>
+        <div class="form-hint">Choose a specific product line to automatically categorize all parts from this Excel file.</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;background:#f8fafc;border:1px solid #e2e8f0;padding:12px 14px;border-radius:8px;margin-bottom:14px;">
+        <div style="font-size:0.82rem;color:#475569;">
+          <strong style="color:#0f172a;"><i class="fas fa-lightbulb" style="color:#f59e0b;"></i> New to uploading?</strong><br>
+          Download our pre-configured template with proper columns.
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="downloadExcelTemplate()">
+          <i class="fas fa-download" style="color:#107c41;"></i> Sample Template
+        </button>
+      </div>
+
+      <div id="excel-upload-preview" style="display:none;margin-top:14px;">
+        <div style="font-weight:700;font-size:0.86rem;margin-bottom:8px;color:#0f172a;" id="excel-preview-status"></div>
+        <div class="table-responsive" style="max-height:180px;">
+          <table class="data-table" id="excel-preview-table">
+            <thead>
+              <tr><th>Product</th><th>Component</th><th>Category</th><th>Qty</th><th>Price (₹)</th><th>Rack</th></tr>
+            </thead>
+            <tbody id="excel-preview-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
+      <button type="button" id="btn-confirm-excel-import" class="btn btn-primary" style="display:none;" onclick="confirmExcelImport()">
+        <i class="fas fa-check-double"></i> Confirm & Import to Dashboard
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="app.js"></script>
+</body>
+</html>
