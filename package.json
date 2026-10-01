@@ -4,7 +4,7 @@
   "description": "ArkaShine Innovations – SoilENZ, Soil Sparsh & Soil Life Component Inventory & Machine Dispatch System",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --experimental-sqlite server.js",
     "build": "echo 'No build step required'"
   },
   "engines": {
