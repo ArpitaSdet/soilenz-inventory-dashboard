@@ -10,14 +10,39 @@ Bidar, Karnataka | CIN: U74999KA2021PTC144988
 
 ---
 
-## 🚀 Quick Launch
+## 🚀 Quick Launch & Hosting
 
-### Run with Persistent SQLite Backend (Recommended)
+### Option A: Host Free on Render (Cloud Deployment)
+This dashboard is completely configured and ready to be hosted on **Render** (render.com):
+1. **Push your code to GitHub / GitLab**:
+   ```bash
+   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. **Deploy on Render**:
+   - Go to [dashboard.render.com](https://dashboard.render.com) and click **"New +" → "Web Service"**.
+   - Select your GitHub/GitLab repository.
+   - Configure with these settings:
+     - **Name**: `soilenz-inventory-dashboard`
+     - **Runtime**: `Node`
+     - **Build Command**: `npm run build` (or leave empty)
+     - **Start Command**: `node server.js`
+     - **Instance Type**: `Free`
+   - In **Environment Variables**, add:
+     - `NODE_VERSION` = `22.12.0`
+3. Click **"Deploy Web Service"**!
+   - Your dashboard will be live on an HTTPS URL like `https://soilenz-inventory-dashboard.onrender.com`.
+   - The native SQLite database automatically loads and seeds on startup.
+
+---
+
+### Option B: Run Locally with Persistent SQLite Backend
 1. Double-click **`start_server.bat`** (or run `node server.js` in terminal).
 2. Open your web browser: **[http://localhost:5000](http://localhost:5000)**.
 3. Automatically connected to **`inventory.db`** SQLite database.
 
-### Standalone Browser Mode
+### Option C: Standalone Browser Mode
 - Double-click **`index.html`** in this folder to open it directly in Chrome, Edge, or Firefox (uses localStorage persistence).
 
 ---
