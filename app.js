@@ -787,6 +787,36 @@ function quickUpdateStockStatus(id, newStatus) {
   }
 }
 
+function quickEditPrice(id) {
+  const item = AppState.components.find(c => c.id === id);
+  if (!item) return;
+
+  const currentVal = (item.price && Number(item.price) > 0) ? Number(item.price).toString() : '';
+  const input = prompt(`Enter Unit Price (₹) for "${item.name}":`, currentVal);
+  if (input === null) return;
+
+  const newPrice = parseFloat(input.trim());
+  if (isNaN(newPrice) || newPrice < 0) {
+    alert('Please enter a valid price amount (e.g. 150 or 25.50).');
+    return;
+  }
+
+  item.price = newPrice;
+  item.updatedAt = new Date().toISOString();
+
+  SoundFX.playSuccess();
+  saveAllDataLocal();
+  syncWithServer();
+  renderAllViews();
+
+  const detailModal = document.getElementById('modal-component-detail');
+  if (detailModal && detailModal.classList.contains('active')) {
+    viewComponentDetail(id);
+  }
+
+  showToast(`Updated price for "${item.name}" to ₹${newPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`);
+}
+
 // ==========================================================================
 // RENDER COMPONENT INVENTORY (TABLE & CARDS)
 // ==========================================================================
@@ -848,7 +878,10 @@ function renderInventory() {
       if (item.status === 'Low Stock') badgeClass = 'badge-low-stock';
       if (item.status === 'Out of Stock') badgeClass = 'badge-out-of-stock';
 
-      const priceFmt = item.price ? `₹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—';
+      const hasPrice = item.price && Number(item.price) > 0;
+      const priceBtn = hasPrice
+        ? `<button class="price-display-pill" onclick="quickEditPrice('${item.id}')" title="Click to edit price directly">₹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })} <i class="fas fa-pencil" style="font-size:0.6rem;opacity:0.6;"></i></button>`
+        : `<button class="price-add-pill" onclick="quickEditPrice('${item.id}')" title="Click to add unit price"><i class="fas fa-plus"></i> Add Price</button>`;
       const linkBtn = item.link ? `<a href="${item.link}" target="_blank" rel="noreferrer" class="table-btn" title="Open Purchase Link"><i class="fas fa-external-link-alt"></i></a>` : '—';
       const prodBadge = getProductBadge(item.product);
 
@@ -863,7 +896,7 @@ function renderInventory() {
           <td>${escapeHTML(item.model || '—')}</td>
           <td><code>${escapeHTML(item.hsn || '—')}</code></td>
           <td><span class="badge badge-category">${escapeHTML(item.category || 'General')}</span></td>
-          <td style="font-weight:700;color:#15803d;">${priceFmt}</td>
+          <td>${priceBtn}</td>
           <td>
             <strong style="font-size:0.95rem;">${item.qty}</strong> <span style="font-size:0.75rem;color:#64748b;">${escapeHTML(item.unit || 'Pcs')}</span>
             <div style="font-size:0.68rem;color:#94a3b8;">Min: ${item.threshold || 0}</div>
@@ -907,7 +940,10 @@ function renderInventory() {
       if (item.status === 'Low Stock') badgeClass = 'badge-low-stock';
       if (item.status === 'Out of Stock') badgeClass = 'badge-out-of-stock';
 
-      const priceFmt = item.price ? `₹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—';
+      const hasPrice = item.price && Number(item.price) > 0;
+      const priceBtn = hasPrice
+        ? `<button class="price-display-pill" onclick="quickEditPrice('${item.id}')" title="Click to edit price directly">₹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })} <i class="fas fa-pencil" style="font-size:0.6rem;opacity:0.6;"></i></button>`
+        : `<button class="price-add-pill" onclick="quickEditPrice('${item.id}')" title="Click to add unit price"><i class="fas fa-plus"></i> Add Price</button>`;
       const prodBadge = getProductBadge(item.product);
 
       return `
@@ -935,7 +971,7 @@ function renderInventory() {
               </div>
               <div style="text-align:right;">
                 <span style="font-size:0.75rem;color:#64748b;">Unit Price:</span>
-                <div class="comp-card-price">${priceFmt}</div>
+                <div class="comp-card-price">${priceBtn}</div>
               </div>
             </div>
             <div class="comp-card-actions">
@@ -1617,8 +1653,10 @@ function viewComponentDetail(id) {
             ${getStatusDropdownHTML(item)}
           </div>
         </div>
-        <div style="font-size:1.25rem;font-weight:800;color:#15803d;">
-          ${item.price ? `â‚¹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'Price not set'}
+        <div style="display:inline-flex;align-items:center;gap:6px;">
+          ${(item.price && Number(item.price) > 0)
+            ? `<button class="price-display-pill" style="font-size:1.15rem;" onclick="quickEditPrice('${item.id}')" title="Click to edit price">₹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })} <i class="fas fa-pencil" style="font-size:0.75rem;opacity:0.6;"></i></button>`
+            : `<button class="price-add-pill" onclick="quickEditPrice('${item.id}')" title="Click to set unit price"><i class="fas fa-plus"></i> Set Price</button>`}
         </div>
       </div>
 
