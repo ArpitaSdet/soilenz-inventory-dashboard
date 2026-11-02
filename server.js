@@ -685,6 +685,62 @@ const DataRepo = {
     };
   },
 
+  async getAllUsers() {
+    if (activeDatabaseType === 'neon-postgres') {
+      const res = await pgPool.query('SELECT id, name, email, role, created_at FROM users ORDER BY created_at ASC');
+      return res.rows;
+    } else if (activeDatabaseType === 'sqlite') {
+      return sqliteDb.prepare('SELECT id, name, email, role, created_at FROM users ORDER BY created_at ASC').all();
+    } else {
+      return memoryStore.users.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, created_at: u.created_at }));
+    }
+  },
+
+  async cleanUsersLeavingAdmin() {
+    const masterEmail = 'admin@arkashine.com';
+    let master = await this.findUserByEmail(masterEmail);
+    if (!master) {
+      master = await this.createUser({
+        name: 'System Administrator',
+        email: masterEmail,
+        password: 'Admin@ArkaShine2026',
+        role: 'admin'
+      });
+    } else if (master.role !== 'admin') {
+      if (activeDatabaseType === 'neon-postgres') {
+        await pgPool.query("UPDATE users SET role = 'admin' WHERE LOWER(email) = $1", [masterEmail]);
+      } else if (activeDatabaseType === 'sqlite') {
+        sqliteDb.prepare("UPDATE users SET role = 'admin' WHERE LOWER(email) = ?").run(masterEmail);
+      } else {
+        master.role = 'admin';
+        persistJsonStore();
+      }
+    }
+
+    let deletedEmails = [];
+    if (activeDatabaseType === 'neon-postgres') {
+      const res = await pgPool.query(
+        "DELETE FROM users WHERE LOWER(email) != $1 RETURNING email",
+        [masterEmail]
+      );
+      deletedEmails = res.rows.map(r => r.email);
+    } else if (activeDatabaseType === 'sqlite') {
+      const rows = sqliteDb.prepare("SELECT email FROM users WHERE LOWER(email) != ?").all(masterEmail);
+      sqliteDb.prepare("DELETE FROM users WHERE LOWER(email) != ?").run(masterEmail);
+      deletedEmails = rows.map(r => r.email);
+    } else {
+      deletedEmails = memoryStore.users.filter(u => u.email.toLowerCase() !== masterEmail).map(u => u.email);
+      memoryStore.users = memoryStore.users.filter(u => u.email.toLowerCase() === masterEmail);
+      persistJsonStore();
+    }
+
+    const remaining = await this.getAllUsers();
+    return {
+      deletedEmails,
+      remaining
+    };
+  },
+
   async getUserCount() {
     if (activeDatabaseType === 'neon-postgres') {
       const res = await pgPool.query('SELECT count(*)::int as count FROM users');
@@ -706,7 +762,6 @@ async function initializeDatabase() {
     try {
       console.log('[Database] Connecting to Neon Serverless PostgreSQL...');
       await initNeonPostgres();
-      return;
     } catch (err) {
       dbInitError = err.message;
       console.error('[Database Error] Neon Postgres connection failed:', err.message);
@@ -719,16 +774,31 @@ async function initializeDatabase() {
     console.log('[Database] No DATABASE_URL provided. Using local database.');
   }
 
-  // Fallback to SQLite
-  try {
-    initSqlite();
-    return;
-  } catch (err) {
-    console.warn('[Database] Native SQLite unavailable:', err.message);
+  // Fallback to SQLite if neon not active
+  if (activeDatabaseType !== 'neon-postgres') {
+    try {
+      initSqlite();
+    } catch (err) {
+      console.warn('[Database] Native SQLite unavailable:', err.message);
+      initJsonStore();
+    }
   }
 
-  // Fallback to JSON Store
-  initJsonStore();
+  // Always ensure master administrator account exists
+  try {
+    const master = await DataRepo.findUserByEmail('admin@arkashine.com');
+    if (!master) {
+      await DataRepo.createUser({
+        name: 'System Administrator',
+        email: 'admin@arkashine.com',
+        password: 'Admin@ArkaShine2026',
+        role: 'admin'
+      });
+      console.log('[Auth] Master admin account ensured: admin@arkashine.com');
+    }
+  } catch (err) {
+    console.warn('[Auth] Error ensuring master admin:', err.message);
+  }
 }
 
 // -------------------------------------------------------------
@@ -922,6 +992,28 @@ const server = http.createServer(async (req, res) => {
         const id = pathname.replace('/api/components/', '');
         await DataRepo.deleteComponent(id);
         return sendJSON(res, 200, { success: true, deleted: id, version: lastDataVersion });
+      }
+
+      // 8. ADMIN: LIST USERS
+      if (pathname === '/api/admin/users' && method === 'GET') {
+        const users = await DataRepo.getAllUsers();
+        return sendJSON(res, 200, {
+          success: true,
+          total: users.length,
+          users
+        });
+      }
+
+      // 9. ADMIN: CLEAN USERS LEAVING ONLY ADMIN
+      if (pathname === '/api/admin/clean-users' && method === 'POST') {
+        const result = await DataRepo.cleanUsersLeavingAdmin();
+        return sendJSON(res, 200, {
+          success: true,
+          message: 'All non-admin user accounts deleted. Master admin preserved.',
+          deletedCount: result.deletedEmails.length,
+          deletedEmails: result.deletedEmails,
+          remainingUsers: result.remaining
+        });
       }
 
       return sendJSON(res, 404, { error: 'API route not found' });
