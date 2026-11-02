@@ -371,7 +371,8 @@ function updateAuthUI() {
 
   if (AppState.currentUser) {
     if (badge) badge.style.display = 'inline-flex';
-    if (nameSpan) nameSpan.textContent = AppState.currentUser.name || 'User';
+    const roleTag = AppState.currentUser.role === 'admin' ? ' [Admin]' : '';
+    if (nameSpan) nameSpan.textContent = (AppState.currentUser.name || 'User') + roleTag;
     if (loginBtn) loginBtn.style.display = 'none';
     if (closeBtn) closeBtn.style.display = 'inline-block';
   } else {
