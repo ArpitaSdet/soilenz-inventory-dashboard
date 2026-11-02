@@ -41,13 +41,14 @@ if (fs.existsSync(ENV_PATH)) {
 }
 
 const PORT = process.env.PORT || 5000;
-const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '';
+const DATABASE_URL = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim().replace(/^["']|["']$/g, '');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'inventory.db');
 const JSON_DB_PATH = path.join(path.dirname(DB_PATH), 'inventory_store.json');
 const JWT_SECRET = process.env.JWT_SECRET || 'arkashine_agritech_secret_key_2026_bidar';
 
 let lastDataVersion = Date.now();
 let activeDatabaseType = 'none';
+let dbInitError = null;
 
 // Ensure directory exists for local files
 const dbDir = path.dirname(DB_PATH);
@@ -707,9 +708,13 @@ async function initializeDatabase() {
       await initNeonPostgres();
       return;
     } catch (err) {
+      dbInitError = err.message;
       console.error('[Database Error] Neon Postgres connection failed:', err.message);
       console.log('[Database] Falling back to local storage engine...');
     }
+  } else if (DATABASE_URL) {
+    dbInitError = 'DATABASE_URL format invalid (must begin with postgresql:// or postgres://)';
+    console.warn('[Database] ' + dbInitError);
   } else {
     console.log('[Database] No DATABASE_URL provided. Using local database.');
   }
@@ -793,6 +798,9 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 200, {
           status: 'ok',
           database: activeDatabaseType,
+          neonConnected: activeDatabaseType === 'neon-postgres',
+          hasDatabaseUrl: Boolean(DATABASE_URL),
+          dbError: dbInitError,
           version: lastDataVersion,
           counts: {
             components: all.components.length,
