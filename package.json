@@ -22,5 +22,8 @@
     "render"
   ],
   "author": "ArkaShine Innovations Private Limited",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "pg": "^8.23.1"
+  }
 }

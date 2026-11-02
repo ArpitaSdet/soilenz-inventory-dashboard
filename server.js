@@ -1,185 +1,244 @@
 /**
  * ArkaShine Innovations – SoilENZ, Soil Sparsh & Soil Life Inventory Backend Server
- * Universal Zero-Dependency Native Node.js Server with Dual Storage:
- * 1. Native SQLite Database (node:sqlite with --experimental-sqlite in Node 22+)
- * 2. High-Performance Resilient JSON Store Fallback (works universally on any Node.js version)
+ * Multi-Engine Cloud Database Support:
+ * 1. Neon Serverless PostgreSQL (Activated via process.env.DATABASE_URL)
+ * 2. SQLite Persistence (Local fallback via node:sqlite)
+ * 3. Resilient JSON Store (Universal offline fallback)
+ * 
+ * Features:
+ * - Neon Serverless PostgreSQL integration (zero data loss across redeploys / 15+ days)
+ * - User Authentication (Register & Login with PBKDF2 password hashing & HMAC tokens)
+ * - Real-Time synchronization engine
+ * - Clean initial state (zero dummy data)
  */
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
+
+// Load .env file if present
+const ENV_PATH = path.join(__dirname, '.env');
+if (fs.existsSync(ENV_PATH)) {
+  try {
+    const envLines = fs.readFileSync(ENV_PATH, 'utf8').split('\n');
+    for (const line of envLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const key = trimmed.slice(0, idx).trim();
+        const val = trimmed.slice(idx + 1).trim();
+        if (!process.env[key]) {
+          process.env[key] = val.replace(/^["']|["']$/g, '');
+        }
+      }
+    }
+    console.log('[Config] Loaded environment variables from .env');
+  } catch (err) {
+    console.warn('[Config] Could not parse .env:', err.message);
+  }
+}
 
 const PORT = process.env.PORT || 5000;
+const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '';
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'inventory.db');
 const JSON_DB_PATH = path.join(path.dirname(DB_PATH), 'inventory_store.json');
+const JWT_SECRET = process.env.JWT_SECRET || 'arkashine_agritech_secret_key_2026_bidar';
 
-// Ensure database directory exists (supports Render persistent disks e.g. /var/data)
+let lastDataVersion = Date.now();
+let activeDatabaseType = 'none';
+
+// Ensure directory exists for local files
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
 // -------------------------------------------------------------
-// SEED DATA DEFINITION
+// CRYPTO & AUTH HELPERS
 // -------------------------------------------------------------
-function getInitialSeedData() {
-  const components = [
-    // 1. SoilENZ
-    { id: "COMP-ENZ-01", product: "SoilENZ", name: "Multi-Wavelength Spectrophotometer Reagent Chamber", category: "Lab & Chemicals", model: "SPEC-CU-V3", hsn: "90273090", sku: "ENZ-SPEC-01", link: "https://arkashine.in/internal/specs", price: 12500, purchaseDate: "2026-08-25", batch: "LOT-2026-OPT-08", qty: 6, unit: "Kits", qtyPerMachine: 1, threshold: 3, rack: "Cold Shelf Cabinet 1, Bin A", vendorName: "ArkaShine Precision Optics Lab", vendorPhone: "+91 8482 255100", vendorAddress: "Bidar Agritech Hub, Bidar, Karnataka", operator: "Dr. R&D Lead", notes: "Custom 420nm, 540nm, 660nm, 880nm calibrated LEDs for enzymatic testing", status: "In Stock", createdAt: "2026-08-25T16:00:00.000Z", updatedAt: "2026-08-25T16:00:00.000Z" },
-    { id: "COMP-ENZ-02", product: "SoilENZ", name: "Peristaltic Reagent Metering Pump 12V DC", category: "Motors & Actuators", model: "PMP-12V-100ML", hsn: "84138190", sku: "ENZ-PMP-02", link: "https://robu.in/product/12v-peristaltic-pump/", price: 850, purchaseDate: "2026-09-12", batch: "LOT-2026-PMP-09", qty: 0, unit: "Pcs", qtyPerMachine: 2, threshold: 4, rack: "Rack C, Shelf 1, Bin 05", vendorName: "Robu.in", vendorPhone: "+91 20 6731 4444", vendorAddress: "Pune, MH", operator: "Store Incharge", notes: "Restock PO #AS-2026-PO-109 issued for SoilENZ line", status: "Out of Stock", createdAt: "2026-09-12T12:00:00.000Z", updatedAt: "2026-09-12T12:00:00.000Z" },
-    { id: "COMP-ENZ-03", product: "SoilENZ", name: "Optical Reagent Micro-Cuvette Vials (Box of 100)", category: "Lab & Chemicals", model: "CVT-100-UV", hsn: "39269099", sku: "ENZ-CVT-03", link: "https://www.tarson.com/cuvettes", price: 980, purchaseDate: "2026-09-15", batch: "LOT-2026-TAR-09", qty: 25, unit: "Kits", qtyPerMachine: 1, threshold: 8, rack: "Cold Shelf Cabinet 2, Bin C", vendorName: "Tarsons Products Ltd", vendorPhone: "+91 33 2289 1234", vendorAddress: "Kolkata, WB", operator: "Store Incharge", notes: "High optical clarity 340-900nm for enzyme absorbance", status: "In Stock", createdAt: "2026-09-15T09:00:00.000Z", updatedAt: "2026-09-15T09:00:00.000Z" },
-    { id: "COMP-ENZ-04", product: "SoilENZ", name: "Soil Dehydrogenase & Urease Assay Reagent Kit", category: "Lab & Chemicals", model: "ASSAY-DH-UR-50", hsn: "38220090", sku: "ENZ-KIT-04", link: "https://arkashine.in/reagents", price: 3400, purchaseDate: "2026-09-18", batch: "LOT-2026-REA-09", qty: 14, unit: "Kits", qtyPerMachine: 1, threshold: 5, rack: "Cold Storage Refrigerator 4°C", vendorName: "HiMedia Laboratories", vendorPhone: "+91 22 6147 6666", vendorAddress: "Mumbai, MH", operator: "Lab Analyst", notes: "50 tests capacity per kit for biological fertility assessment", status: "In Stock", createdAt: "2026-09-18T10:00:00.000Z", updatedAt: "2026-09-18T10:00:00.000Z" },
-
-    // 2. Soil Sparsh
-    { id: "COMP-SPR-01", product: "Soil Sparsh", name: "Soil NPK 3-in-1 Sensor Probe (RS485 Modbus)", category: "Sensors & Probes", model: "NPK-RS485-M12", hsn: "90278090", sku: "SPR-NPK-01", link: "https://robu.in/product/soil-npk-sensor/", price: 4200, purchaseDate: "2026-09-02", batch: "LOT-2026-NPK-09", qty: 12, unit: "Pcs", qtyPerMachine: 1, threshold: 6, rack: "Rack B, Shelf 1, Bin 12", vendorName: "Goutham Electronics", vendorPhone: "+91 80 2221 3456", vendorAddress: "Electronics Market, SP Road, Bengaluru", operator: "Assembly Tech", notes: "Stainless steel 316 waterproof probes calibrated for Soil Sparsh", status: "In Stock", createdAt: "2026-09-02T09:30:00.000Z", updatedAt: "2026-09-02T09:30:00.000Z" },
-    { id: "COMP-SPR-02", product: "Soil Sparsh", name: "Soil pH Electrode & Signal Transmitter Module", category: "Sensors & Probes", model: "PH-E201-BNC", hsn: "90278090", sku: "SPR-PH-02", link: "https://www.dfrobot.com/product-1782.html", price: 2150, purchaseDate: "2026-09-05", batch: "LOT-2026-PH-09", qty: 3, unit: "Pcs", qtyPerMachine: 1, threshold: 5, rack: "Rack B, Shelf 1, Bin 14", vendorName: "Robu.in", vendorPhone: "+91 20 6731 4444", vendorAddress: "Pune, MH", operator: "Store Incharge", notes: "Requires pH 4.01 & 7.00 buffer calibration", status: "Low Stock", createdAt: "2026-09-05T14:15:00.000Z", updatedAt: "2026-09-05T14:15:00.000Z" },
-    { id: "COMP-SPR-03", product: "Soil Sparsh", name: "Soil EC / Salinity & Temp Probe (RS485)", category: "Sensors & Probes", model: "EC-TEMP-MOD-01", hsn: "90278090", sku: "SPR-EC-03", link: "https://robu.in/product/soil-ec-sensor/", price: 3600, purchaseDate: "2026-09-08", batch: "LOT-2026-EC-09", qty: 15, unit: "Pcs", qtyPerMachine: 1, threshold: 5, rack: "Rack B, Shelf 2, Bin 03", vendorName: "Goutham Electronics", vendorPhone: "+91 80 2221 3456", vendorAddress: "SP Road, Bengaluru", operator: "Store Incharge", notes: "Range 0-20000 us/cm", status: "In Stock", createdAt: "2026-09-08T15:20:00.000Z", updatedAt: "2026-09-08T15:20:00.000Z" },
-    { id: "COMP-SPR-04", product: "Soil Sparsh", name: "Handheld Ergonomic ABS Enclosure with Grip Handle", category: "Packaging & Enclosures", model: "ENC-SPARSH-HD2", hsn: "39269099", sku: "SPR-ENC-04", link: "https://arkashine.in/hardware/sparsh", price: 1800, purchaseDate: "2026-09-10", batch: "LOT-2026-ENC-09", qty: 18, unit: "Pcs", qtyPerMachine: 1, threshold: 4, rack: "Rack C, Shelf 2, Bin 08", vendorName: "Om Precision Polymers", vendorPhone: "+91 80 2839 1122", vendorAddress: "Peenya, Bengaluru", operator: "Assembly Tech", notes: "Rubberized grip with IP65 ingress protection", status: "In Stock", createdAt: "2026-09-10T16:00:00.000Z", updatedAt: "2026-09-10T16:00:00.000Z" },
-
-    // 3. Soil Life
-    { id: "COMP-LIF-01", product: "Soil Life", name: "Microbial Soil Respiration CO2 Flux NDIR Gas Sensor", category: "Sensors & Probes", model: "CO2-NDIR-5000PPM", hsn: "90278090", sku: "LIF-CO2-01", link: "https://robu.in/product/co2-sensor-ndir/", price: 8900, purchaseDate: "2026-09-01", batch: "LOT-2026-NDIR-09", qty: 8, unit: "Pcs", qtyPerMachine: 1, threshold: 3, rack: "Rack B, Shelf 3, Bin 01", vendorName: "SenseAir India", vendorPhone: "+91 80 4900 8800", vendorAddress: "Whitefield, Bengaluru", operator: "Dr. R&D Lead", notes: "Measures soil biological microbial respiration rate", status: "In Stock", createdAt: "2026-09-01T11:00:00.000Z", updatedAt: "2026-09-01T11:00:00.000Z" },
-    { id: "COMP-LIF-02", product: "Soil Life", name: "Soil Organic Carbon (SOC) NIR Spectroscopy Sensor", category: "Sensors & Probes", model: "SOC-NIR-900-1700", hsn: "90273090", sku: "LIF-SOC-02", link: "https://arkashine.in/sensors/soc", price: 11200, purchaseDate: "2026-09-04", batch: "LOT-2026-SOC-09", qty: 5, unit: "Pcs", qtyPerMachine: 1, threshold: 3, rack: "Rack B, Shelf 3, Bin 04", vendorName: "Hamamatsu Photonics India", vendorPhone: "+91 22 2831 4400", vendorAddress: "Andheri East, Mumbai", operator: "Dr. R&D Lead", notes: "Active NIR reflectance sensor for real-time organic carbon estimation", status: "In Stock", createdAt: "2026-09-04T14:30:00.000Z", updatedAt: "2026-09-04T14:30:00.000Z" },
-    { id: "COMP-LIF-03", product: "Soil Life", name: "Biological Incubation Micro-Cell 37°C Chamber", category: "Lab & Chemicals", model: "BIO-INC-V2", hsn: "84198990", sku: "LIF-BIO-03", link: "https://arkashine.in/hardware/life", price: 5600, purchaseDate: "2026-09-07", batch: "LOT-2026-INC-09", qty: 7, unit: "Kits", qtyPerMachine: 1, threshold: 2, rack: "Rack C, Shelf 3, Bin 02", vendorName: "ArkaShine Precision Optics Lab", vendorPhone: "+91 8482 255100", vendorAddress: "Bidar Agritech Hub, Bidar", operator: "Assembly Tech", notes: "Peltier-controlled thermal incubation cell for active soil microbes", status: "In Stock", createdAt: "2026-09-07T13:00:00.000Z", updatedAt: "2026-09-07T13:00:00.000Z" },
-
-    // 4. Common Parts
-    { id: "COMP-COM-01", product: "Common", name: "Raspberry Pi 4 Model B (4GB RAM)", category: "Microcontrollers & SBCs", model: "RPI-4B-4GB", hsn: "84715000", sku: "COM-RPI4-01", link: "https://www.raspberrypi.com/products/raspberry-pi-4-model-b/", price: 5499, purchaseDate: "2026-08-15", batch: "LOT-2026-RPI-08", qty: 24, unit: "Pcs", qtyPerMachine: 1, threshold: 5, rack: "Rack A, Shelf 2, Bin 04", vendorName: "Robu.in / Macfos Ltd", vendorPhone: "+91 20 6731 4444", vendorAddress: "Bhosari Industrial Estate, Pune, MH", operator: "Store Incharge", notes: "QC Passed, used in SoilENZ, Sparsh & Life systems", status: "In Stock", createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-15T10:00:00.000Z" },
-    { id: "COMP-COM-02", product: "Common", name: "7-Inch Capacitive IPS Touch Display HDMI", category: "Displays & Cameras", model: "WVS-70-IPS-1024", hsn: "85285200", sku: "COM-DSP-02", link: "https://www.waveshare.com/7inch-hdmi-lcd-c.htm", price: 3850, purchaseDate: "2026-08-20", batch: "LOT-2026-DSP-08", qty: 18, unit: "Pcs", qtyPerMachine: 1, threshold: 4, rack: "Rack A, Shelf 3, Bin 01", vendorName: "Waveshare Electronics", vendorPhone: "+91 80 4123 9988", vendorAddress: "SP Road, Bengaluru - 560002", operator: "Store Incharge", notes: "Includes ribbon cable and brass standoffs", status: "In Stock", createdAt: "2026-08-20T11:00:00.000Z", updatedAt: "2026-08-20T11:00:00.000Z" },
-    { id: "COMP-COM-03", product: "Common", name: "12V 10000mAh LiFePO4 Battery Pack with BMS", category: "Power & Battery", model: "LFP-12V-10AH-BMS", hsn: "85076000", sku: "COM-BAT-03", link: "https://www.evlithium.com/12v-lifepo4-battery.html", price: 4950, purchaseDate: "2026-09-10", batch: "LOT-2026-BAT-09", qty: 8, unit: "Pcs", qtyPerMachine: 1, threshold: 4, rack: "Battery Fire-Safe Cabinet, Rack C", vendorName: "Ampere Energy Systems", vendorPhone: "+91 44 2855 1234", vendorAddress: "Ambattur Industrial Estate, Chennai", operator: "Store Incharge", notes: "Equipped with 20A BMS, safety tested", status: "In Stock", createdAt: "2026-09-10T11:45:00.000Z", updatedAt: "2026-09-10T11:45:00.000Z" },
-    { id: "COMP-COM-04", product: "Common", name: "Heavy-Duty All-Weather Field Backpack Chassis", category: "Packaging & Enclosures", model: "BPK-MIL-SOIL-V2", hsn: "42029200", sku: "COM-BPK-04", link: "https://arkashine.in/hardware/enclosures", price: 3400, purchaseDate: "2026-08-30", batch: "LOT-2026-BPK-08", qty: 10, unit: "Pcs", qtyPerMachine: 1, threshold: 3, rack: "Bulk Storage Bay 2", vendorName: "Karnataka Canvas & Gear Works", vendorPhone: "+91 80 2344 5678", vendorAddress: "Peenya Industrial Area, Bengaluru", operator: "Assembly Tech", notes: "Shockproof EVA custom molded insert included", status: "In Stock", createdAt: "2026-08-30T10:10:00.000Z", updatedAt: "2026-08-30T10:10:00.000Z" }
-  ];
-
-  const machines = [
-    {
-      id: "MACH-2026-001",
-      product: "SoilENZ",
-      serialNumber: "SE-2026-012",
-      model: "SoilENZ AI Automated Lab System V2",
-      status: "Dispatched",
-      registeredDate: "2026-09-01",
-      allocatedComponents: [
-        { compId: "COMP-ENZ-01", compName: "Multi-Wavelength Spectrophotometer Chamber", qty: 1 },
-        { compId: "COMP-ENZ-03", compName: "Optical Reagent Micro-Cuvette Vials", qty: 1 },
-        { compId: "COMP-COM-01", compName: "Raspberry Pi 4 Model B (4GB RAM)", qty: 1 },
-        { compId: "COMP-COM-02", compName: "7-Inch Capacitive IPS Touch Display HDMI", qty: 1 },
-        { compId: "COMP-COM-03", compName: "12V 10000mAh LiFePO4 Battery Pack", qty: 1 }
-      ],
-      dispatchId: "DISP-2026-089"
-    },
-    {
-      id: "MACH-2026-002",
-      product: "Soil Sparsh",
-      serialNumber: "SP-2026-045",
-      model: "Soil Sparsh Rapid Multi-Sensor Analyzer",
-      status: "Assembled",
-      registeredDate: "2026-09-15",
-      allocatedComponents: [
-        { compId: "COMP-SPR-01", compName: "Soil NPK 3-in-1 Sensor Probe", qty: 1 },
-        { compId: "COMP-SPR-02", compName: "Soil pH Electrode & Transmitter", qty: 1 },
-        { compId: "COMP-SPR-03", compName: "Soil EC / Salinity & Temp Probe", qty: 1 },
-        { compId: "COMP-SPR-04", compName: "Handheld Ergonomic ABS Enclosure", qty: 1 }
-      ],
-      dispatchId: null
-    },
-    {
-      id: "MACH-2026-003",
-      product: "Soil Life",
-      serialNumber: "SL-2026-008",
-      model: "Soil Life Bio-Activity & Microbial Station",
-      status: "In Assembly",
-      registeredDate: "2026-09-22",
-      allocatedComponents: [
-        { compId: "COMP-LIF-01", compName: "Microbial Respiration CO2 Flux Sensor", qty: 1 },
-        { compId: "COMP-LIF-02", compName: "Soil Organic Carbon NIR Sensor", qty: 1 },
-        { compId: "COMP-LIF-03", compName: "Biological Incubation Micro-Cell", qty: 1 }
-      ],
-      dispatchId: null
-    }
-  ];
-
-  const dispatches = [
-    {
-      id: "DISP-2026-089",
-      product: "SoilENZ",
-      machineSerial: "SE-2026-012",
-      machineModel: "SoilENZ AI Automated Lab System V2",
-      dispatchDate: "2026-09-25",
-      destinationName: "Agri Innovation Centre, UAS Bangalore",
-      destinationAddress: "GKVK Campus, Bellary Road, Bangalore - 560065",
-      pathRoute: "Bidar R&D Center → Kalaburagi Hub → NH44 Express → Bengaluru GKVK Station",
-      consigneeContact: "Dr. K. S. Patil - +91 94801 23456",
-      transporter: "VRL Logistics Express Cargo",
-      trackingWaybill: "VRL-BLR-892104",
-      operator: "Dispatch Supervisor - M. R. Swamy",
-      notes: "Pre-calibrated for enzymatic black cotton soil testing. Reagent kit included.",
-      timestamp: "2026-09-25T14:30:00.000Z"
-    }
-  ];
-
-  const movements = [
-    { id: "TX-1001", timestamp: "2026-08-15 10:15", type: "IN", compId: "COMP-COM-01", compName: "Raspberry Pi 4 Model B (4GB RAM)", qty: 25, balanceAfter: 25, reason: "Direct Supplier Purchase", machineRef: "N/A", operator: "Store Incharge", notes: "Supplier Invoice #ROBU-INV-2026-88" },
-    { id: "TX-1002", timestamp: "2026-09-18 16:00", type: "OUT", compId: "COMP-ENZ-01", compName: "Multi-Wavelength Spectrophotometer Chamber", qty: 1, balanceAfter: 6, reason: "Machine Allocation", machineRef: "SE-2026-012", operator: "Assembly Tech", notes: "Installed into SoilENZ System SE-2026-012" },
-    { id: "TX-1003", timestamp: "2026-09-20 11:30", type: "OUT", compId: "COMP-ENZ-02", compName: "Peristaltic Reagent Metering Pump 12V DC", qty: 2, balanceAfter: 0, reason: "Machine Allocation", machineRef: "SE-2026-012", operator: "Assembly Tech", notes: "Final stock exhausted - reorder pending" }
-  ];
-
-  const notifications = [
-    { id: "NOTIF-1", type: "danger", title: "Stock Depleted: Peristaltic Reagent Metering Pump (SoilENZ)", message: "Inventory reached 0 Pcs. Machine assembly for SoilENZ System is paused until restocked.", timestamp: "2026-09-20 11:30", read: false },
-    { id: "NOTIF-2", type: "warning", title: "Low Stock Alert: Soil pH Electrode (Soil Sparsh)", message: "Remaining stock is 3 Pcs (Safety threshold is 5 Pcs).", timestamp: "2026-09-21 09:15", read: false },
-    { id: "NOTIF-3", type: "success", title: "Machine Dispatched: SoilENZ SE-2026-012", message: "En route to UAS Bangalore via VRL Logistics (Waybill: VRL-BLR-892104).", timestamp: "2026-09-25 14:35", read: false }
-  ];
-
-  return { components, machines, movements, dispatches, notifications };
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
 }
 
-// -------------------------------------------------------------
-// DUAL STORAGE ENGINE SETUP
-// -------------------------------------------------------------
-let db = null;
-let isSqlite = false;
-let jsonStore = null;
-
-// Try to safely load native SQLite
-try {
-  const { DatabaseSync } = require('node:sqlite');
-  db = new DatabaseSync(DB_PATH);
-  isSqlite = true;
-  console.log(`[Database] Native SQLite loaded successfully at: ${DB_PATH}`);
-  initSqliteSchema();
-} catch (err) {
-  isSqlite = false;
-  console.warn(`[Database Info] Native node:sqlite not enabled (${err.message}).`);
-  console.log(`[Database] Activating Resilient JSON Database Engine at: ${JSON_DB_PATH}`);
-  initJsonStore();
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, key] = storedHash.split(':');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return key === hash;
 }
 
-function initJsonStore() {
-  if (fs.existsSync(JSON_DB_PATH)) {
-    try {
-      const content = fs.readFileSync(JSON_DB_PATH, 'utf8');
-      jsonStore = JSON.parse(content);
-      if (jsonStore && jsonStore.components && jsonStore.machines) {
-        console.log(`[Database] Loaded ${jsonStore.components.length} components from JSON store.`);
-        return;
-      }
-    } catch (e) {
-      console.error('[Database] Failed to parse existing JSON store, recreating...', e);
-    }
-  }
-
-  jsonStore = getInitialSeedData();
-  saveJsonStore();
-  console.log(`[Database] JSON store initialized with 3-Product default catalog.`);
+function generateToken(user) {
+  const payload = Buffer.from(JSON.stringify({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role || 'operator',
+    iat: Date.now(),
+    exp: Date.now() + 60 * 24 * 60 * 60 * 1000 // 60 days
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
 }
 
-function saveJsonStore() {
+function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
+  const expected = crypto.createHmac('sha256', JWT_SECRET).update(payload).digest('base64url');
+  if (signature !== expected) return null;
   try {
-    fs.writeFileSync(JSON_DB_PATH, JSON.stringify(jsonStore, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[Database Save Error]', err);
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (data.exp && Date.now() > data.exp) return null;
+    return data;
+  } catch (e) {
+    return null;
   }
 }
 
-function initSqliteSchema() {
-  db.exec(`
+// -------------------------------------------------------------
+// DATABASE ENGINES
+// -------------------------------------------------------------
+let pgPool = null;
+let sqliteDb = null;
+let memoryStore = {
+  users: [],
+  components: [],
+  machines: [],
+  movements: [],
+  dispatches: [],
+  notifications: []
+};
+
+// 1. NEON POSTGRESQL ENGINE
+async function initNeonPostgres() {
+  const { Pool } = require('pg');
+  pgPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+  });
+
+  // Verify connection
+  const client = await pgPool.connect();
+  try {
+    console.log('[Database] Connected to Neon PostgreSQL cloud instance successfully.');
+
+    // Create tables
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'operator',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS components (
+        id TEXT PRIMARY KEY,
+        product TEXT DEFAULT 'SoilENZ',
+        name TEXT NOT NULL,
+        category TEXT,
+        model TEXT,
+        hsn TEXT,
+        sku TEXT,
+        link TEXT,
+        price NUMERIC DEFAULT 0,
+        purchase_date TEXT,
+        batch TEXT,
+        qty INTEGER DEFAULT 0,
+        unit TEXT DEFAULT 'Pcs',
+        qty_per_machine INTEGER DEFAULT 1,
+        threshold INTEGER DEFAULT 5,
+        rack TEXT,
+        vendor_name TEXT,
+        vendor_phone TEXT,
+        vendor_address TEXT,
+        operator TEXT,
+        notes TEXT,
+        status TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS machines (
+        id TEXT PRIMARY KEY,
+        product TEXT DEFAULT 'SoilENZ',
+        serial_number TEXT UNIQUE,
+        model TEXT,
+        status TEXT,
+        registered_date TEXT,
+        allocated_components TEXT,
+        dispatch_id TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS movements (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT,
+        type TEXT,
+        comp_id TEXT,
+        comp_name TEXT,
+        qty INTEGER,
+        balance_after INTEGER,
+        reason TEXT,
+        machine_ref TEXT,
+        operator TEXT,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS dispatches (
+        id TEXT PRIMARY KEY,
+        product TEXT DEFAULT 'SoilENZ',
+        machine_serial TEXT,
+        machine_model TEXT,
+        dispatch_date TEXT,
+        destination_name TEXT,
+        destination_address TEXT,
+        path_route TEXT,
+        consignee_contact TEXT,
+        transporter TEXT,
+        tracking_waybill TEXT,
+        operator TEXT,
+        notes TEXT,
+        timestamp TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT,
+        title TEXT,
+        message TEXT,
+        timestamp TEXT,
+        read INTEGER DEFAULT 0
+      );
+    `);
+
+    activeDatabaseType = 'neon-postgres';
+    console.log('[Database] Neon PostgreSQL schema verified & active.');
+  } finally {
+    client.release();
+  }
+}
+
+// 2. SQLITE LOCAL FALLBACK
+function initSqlite() {
+  const { DatabaseSync } = require('node:sqlite');
+  sqliteDb = new DatabaseSync(DB_PATH);
+  
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'operator',
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS components (
       id TEXT PRIMARY KEY,
       product TEXT DEFAULT 'SoilENZ',
@@ -190,44 +249,44 @@ function initSqliteSchema() {
       sku TEXT,
       link TEXT,
       price REAL DEFAULT 0,
-      purchaseDate TEXT,
+      purchase_date TEXT,
       batch TEXT,
       qty INTEGER DEFAULT 0,
       unit TEXT DEFAULT 'Pcs',
-      qtyPerMachine INTEGER DEFAULT 1,
+      qty_per_machine INTEGER DEFAULT 1,
       threshold INTEGER DEFAULT 5,
       rack TEXT,
-      vendorName TEXT,
-      vendorPhone TEXT,
-      vendorAddress TEXT,
+      vendor_name TEXT,
+      vendor_phone TEXT,
+      vendor_address TEXT,
       operator TEXT,
       notes TEXT,
       status TEXT,
-      createdAt TEXT,
-      updatedAt TEXT
+      created_at TEXT,
+      updated_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS machines (
       id TEXT PRIMARY KEY,
       product TEXT DEFAULT 'SoilENZ',
-      serialNumber TEXT UNIQUE,
+      serial_number TEXT UNIQUE,
       model TEXT,
       status TEXT,
-      registeredDate TEXT,
-      allocatedComponents TEXT,
-      dispatchId TEXT
+      registered_date TEXT,
+      allocated_components TEXT,
+      dispatch_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS movements (
       id TEXT PRIMARY KEY,
       timestamp TEXT,
       type TEXT,
-      compId TEXT,
-      compName TEXT,
+      comp_id TEXT,
+      comp_name TEXT,
       qty INTEGER,
-      balanceAfter INTEGER,
+      balance_after INTEGER,
       reason TEXT,
-      machineRef TEXT,
+      machine_ref TEXT,
       operator TEXT,
       notes TEXT
     );
@@ -235,15 +294,15 @@ function initSqliteSchema() {
     CREATE TABLE IF NOT EXISTS dispatches (
       id TEXT PRIMARY KEY,
       product TEXT DEFAULT 'SoilENZ',
-      machineSerial TEXT,
-      machineModel TEXT,
-      dispatchDate TEXT,
-      destinationName TEXT,
-      destinationAddress TEXT,
-      pathRoute TEXT,
-      consigneeContact TEXT,
+      machine_serial TEXT,
+      machine_model TEXT,
+      dispatch_date TEXT,
+      destination_name TEXT,
+      destination_address TEXT,
+      path_route TEXT,
+      consignee_contact TEXT,
       transporter TEXT,
-      trackingWaybill TEXT,
+      tracking_waybill TEXT,
       operator TEXT,
       notes TEXT,
       timestamp TEXT
@@ -259,55 +318,416 @@ function initSqliteSchema() {
     );
   `);
 
-  try { db.exec("ALTER TABLE components ADD COLUMN product TEXT DEFAULT 'SoilENZ'"); } catch(e) {}
-  try { db.exec("ALTER TABLE machines ADD COLUMN product TEXT DEFAULT 'SoilENZ'"); } catch(e) {}
-  try { db.exec("ALTER TABLE dispatches ADD COLUMN product TEXT DEFAULT 'SoilENZ'"); } catch(e) {}
-
-  const hasSoilLife = db.prepare("SELECT count(*) as count FROM components WHERE product = 'Soil Life'").get();
-  if (!hasSoilLife || hasSoilLife.count === 0) {
-    console.log('[Database] Seeding complete 3-Product inventory in SQLite...');
-    seedSqliteDatabase();
-  }
+  activeDatabaseType = 'sqlite';
+  console.log(`[Database] Native SQLite loaded at: ${DB_PATH}`);
 }
 
-function seedSqliteDatabase() {
-  db.exec("DELETE FROM components; DELETE FROM machines; DELETE FROM dispatches; DELETE FROM movements; DELETE FROM notifications;");
-
-  const seed = getInitialSeedData();
-
-  const insertComp = db.prepare(`
-    INSERT INTO components (id, product, name, category, model, hsn, sku, link, price, purchaseDate, batch, qty, unit, qtyPerMachine, threshold, rack, vendorName, vendorPhone, vendorAddress, operator, notes, status, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  for (const c of seed.components) {
-    insertComp.run(c.id, c.product, c.name, c.category, c.model, c.hsn, c.sku, c.link, c.price, c.purchaseDate, c.batch, c.qty, c.unit, c.qtyPerMachine, c.threshold, c.rack, c.vendorName, c.vendorPhone, c.vendorAddress, c.operator, c.notes, c.status, c.createdAt, c.updatedAt);
+// 3. JSON STORE LOCAL FALLBACK
+function initJsonStore() {
+  if (fs.existsSync(JSON_DB_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(JSON_DB_PATH, 'utf8'));
+      memoryStore = {
+        users: data.users || [],
+        components: data.components || [],
+        machines: data.machines || [],
+        movements: data.movements || [],
+        dispatches: data.dispatches || [],
+        notifications: data.notifications || []
+      };
+      console.log(`[Database] Loaded JSON Store with ${memoryStore.components.length} components.`);
+    } catch (e) {
+      console.warn('[Database] JSON Store recreated:', e.message);
+    }
   }
+  activeDatabaseType = 'json';
+}
 
-  const insertMach = db.prepare(`INSERT INTO machines (id, product, serialNumber, model, status, registeredDate, allocatedComponents, dispatchId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const m of seed.machines) {
-    insertMach.run(m.id, m.product, m.serialNumber, m.model, m.status, m.registeredDate, JSON.stringify(m.allocatedComponents || []), m.dispatchId);
+function persistJsonStore() {
+  if (activeDatabaseType === 'json') {
+    try {
+      fs.writeFileSync(JSON_DB_PATH, JSON.stringify(memoryStore, null, 2), 'utf8');
+    } catch (e) {
+      console.error('[Database] Failed to write JSON Store:', e.message);
+    }
   }
-
-  const insertDisp = db.prepare(`INSERT INTO dispatches (id, product, machineSerial, machineModel, dispatchDate, destinationName, destinationAddress, pathRoute, consigneeContact, transporter, trackingWaybill, operator, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const d of seed.dispatches) {
-    insertDisp.run(d.id, d.product, d.machineSerial, d.machineModel, d.dispatchDate, d.destinationName, d.destinationAddress, d.pathRoute, d.consigneeContact, d.transporter, d.trackingWaybill, d.operator, d.notes, d.timestamp);
-  }
-
-  const insertMov = db.prepare(`INSERT INTO movements (id, timestamp, type, compId, compName, qty, balanceAfter, reason, machineRef, operator, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const mov of seed.movements) {
-    insertMov.run(mov.id, mov.timestamp, mov.type, mov.compId, mov.compName, mov.qty, mov.balanceAfter, mov.reason, mov.machineRef, mov.operator, mov.notes);
-  }
-
-  const insertNotif = db.prepare(`INSERT INTO notifications (id, type, title, message, timestamp, read) VALUES (?, ?, ?, ?, ?, ?)`);
-  for (const n of seed.notifications) {
-    insertNotif.run(n.id, n.type, n.title, n.message, n.timestamp, n.read ? 1 : 0);
-  }
-
-  console.log('[Database] 3-Product initial SQLite seeding completed.');
 }
 
 // -------------------------------------------------------------
-// HELPERS
+// UNIFIED DATA ACCESS HELPERS
+// -------------------------------------------------------------
+function mapComponentFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    product: row.product || 'SoilENZ',
+    name: row.name || '',
+    category: row.category || '',
+    model: row.model || '',
+    hsn: row.hsn || '',
+    sku: row.sku || '',
+    link: row.link || '',
+    price: Number(row.price) || 0,
+    purchaseDate: row.purchase_date || row.purchaseDate || '',
+    batch: row.batch || '',
+    qty: Number(row.qty) || 0,
+    unit: row.unit || 'Pcs',
+    qtyPerMachine: Number(row.qty_per_machine || row.qtyPerMachine) || 1,
+    threshold: Number(row.threshold) || 5,
+    rack: row.rack || '',
+    vendorName: row.vendor_name || row.vendorName || '',
+    vendorPhone: row.vendor_phone || row.vendorPhone || '',
+    vendorAddress: row.vendor_address || row.vendorAddress || '',
+    operator: row.operator || '',
+    notes: row.notes || '',
+    status: row.status || 'In Stock',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    updatedAt: row.updated_at || row.updatedAt || new Date().toISOString()
+  };
+}
+
+function mapMachineFromRow(row) {
+  if (!row) return null;
+  let allocated = [];
+  try {
+    allocated = typeof row.allocated_components === 'string' 
+      ? JSON.parse(row.allocated_components) 
+      : (row.allocatedComponents || row.allocated_components || []);
+  } catch (e) {
+    allocated = [];
+  }
+  return {
+    id: row.id,
+    product: row.product || 'SoilENZ',
+    serialNumber: row.serial_number || row.serialNumber,
+    model: row.model,
+    status: row.status,
+    registeredDate: row.registered_date || row.registeredDate,
+    allocatedComponents: allocated,
+    dispatchId: row.dispatch_id || row.dispatchId || null
+  };
+}
+
+function mapMovementFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    timestamp: row.timestamp,
+    type: row.type,
+    compId: row.comp_id || row.compId,
+    compName: row.comp_name || row.compName,
+    qty: Number(row.qty) || 0,
+    balanceAfter: Number(row.balance_after || row.balanceAfter) || 0,
+    reason: row.reason,
+    machineRef: row.machine_ref || row.machineRef,
+    operator: row.operator,
+    notes: row.notes
+  };
+}
+
+function mapDispatchFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    product: row.product || 'SoilENZ',
+    machineSerial: row.machine_serial || row.machineSerial,
+    machineModel: row.machine_model || row.machineModel,
+    dispatchDate: row.dispatch_date || row.dispatchDate,
+    destinationName: row.destination_name || row.destinationName,
+    destinationAddress: row.destination_address || row.destinationAddress,
+    pathRoute: row.path_route || row.pathRoute,
+    consigneeContact: row.consignee_contact || row.consigneeContact,
+    transporter: row.transporter,
+    trackingWaybill: row.tracking_waybill || row.trackingWaybill,
+    operator: row.operator,
+    notes: row.notes,
+    timestamp: row.timestamp
+  };
+}
+
+// -------------------------------------------------------------
+// DATA REPOSITORY
+// -------------------------------------------------------------
+const DataRepo = {
+  async getAllData() {
+    if (activeDatabaseType === 'neon-postgres') {
+      const comps = await pgPool.query('SELECT * FROM components ORDER BY created_at DESC');
+      const machs = await pgPool.query('SELECT * FROM machines ORDER BY registered_date DESC');
+      const movs = await pgPool.query('SELECT * FROM movements ORDER BY id ASC');
+      const disps = await pgPool.query('SELECT * FROM dispatches ORDER BY timestamp DESC');
+      const notifs = await pgPool.query('SELECT * FROM notifications ORDER BY timestamp DESC');
+      return {
+        components: comps.rows.map(mapComponentFromRow),
+        machines: machs.rows.map(mapMachineFromRow),
+        movements: movs.rows.map(mapMovementFromRow),
+        dispatches: disps.rows.map(mapDispatchFromRow),
+        notifications: notifs.rows.map(n => ({ ...n, read: Boolean(n.read) }))
+      };
+    } else if (activeDatabaseType === 'sqlite') {
+      const comps = sqliteDb.prepare('SELECT * FROM components').all();
+      const machs = sqliteDb.prepare('SELECT * FROM machines').all();
+      const movs = sqliteDb.prepare('SELECT * FROM movements').all();
+      const disps = sqliteDb.prepare('SELECT * FROM dispatches').all();
+      const notifs = sqliteDb.prepare('SELECT * FROM notifications').all();
+      comps.sort((a,b) => (b.createdAt || b.created_at || '').localeCompare(a.createdAt || a.created_at || ''));
+      machs.sort((a,b) => (b.registeredDate || b.registered_date || '').localeCompare(a.registeredDate || a.registered_date || ''));
+      disps.sort((a,b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      notifs.sort((a,b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      return {
+        components: comps.map(mapComponentFromRow),
+        machines: machs.map(mapMachineFromRow),
+        movements: movs.map(mapMovementFromRow),
+        dispatches: disps.map(mapDispatchFromRow),
+        notifications: notifs.map(n => ({ ...n, read: Boolean(n.read) }))
+      };
+    } else {
+      return {
+        components: memoryStore.components,
+        machines: memoryStore.machines,
+        movements: memoryStore.movements,
+        dispatches: memoryStore.dispatches,
+        notifications: memoryStore.notifications
+      };
+    }
+  },
+
+  async saveAllData(payload) {
+    const { components, machines, movements, dispatches, notifications } = payload;
+    lastDataVersion = Date.now();
+
+    if (activeDatabaseType === 'neon-postgres') {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+
+        if (components && Array.isArray(components)) {
+          const compQuery = `
+            INSERT INTO components (
+              id, product, name, category, model, hsn, sku, link, price, purchase_date, batch, qty, unit, qty_per_machine, threshold, rack, vendor_name, vendor_phone, vendor_address, operator, notes, status, created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+            ) ON CONFLICT (id) DO UPDATE SET
+              product = EXCLUDED.product, name = EXCLUDED.name, category = EXCLUDED.category, model = EXCLUDED.model, hsn = EXCLUDED.hsn, sku = EXCLUDED.sku, link = EXCLUDED.link, price = EXCLUDED.price, purchase_date = EXCLUDED.purchase_date, batch = EXCLUDED.batch, qty = EXCLUDED.qty, unit = EXCLUDED.unit, qty_per_machine = EXCLUDED.qty_per_machine, threshold = EXCLUDED.threshold, rack = EXCLUDED.rack, vendor_name = EXCLUDED.vendor_name, vendor_phone = EXCLUDED.vendor_phone, vendor_address = EXCLUDED.vendor_address, operator = EXCLUDED.operator, notes = EXCLUDED.notes, status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+          `;
+          for (const c of components) {
+            await client.query(compQuery, [
+              c.id, c.product || 'SoilENZ', c.name || '', c.category || '', c.model || '', c.hsn || '', c.sku || '', c.link || '',
+              Number(c.price) || 0, c.purchaseDate || '', c.batch || '', Number(c.qty) || 0, c.unit || 'Pcs',
+              Number(c.qtyPerMachine) || 1, Number(c.threshold) || 5, c.rack || '', c.vendorName || '',
+              c.vendorPhone || '', c.vendorAddress || '', c.operator || '', c.notes || '', c.status || 'In Stock',
+              c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
+            ]);
+          }
+        }
+
+        if (machines && Array.isArray(machines)) {
+          const machQuery = `
+            INSERT INTO machines (id, product, serial_number, model, status, registered_date, allocated_components, dispatch_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (id) DO UPDATE SET
+              product = EXCLUDED.product, serial_number = EXCLUDED.serial_number, model = EXCLUDED.model, status = EXCLUDED.status, registered_date = EXCLUDED.registered_date, allocated_components = EXCLUDED.allocated_components, dispatch_id = EXCLUDED.dispatch_id
+          `;
+          for (const m of machines) {
+            await client.query(machQuery, [
+              m.id, m.product || 'SoilENZ', m.serialNumber, m.model, m.status, m.registeredDate, JSON.stringify(m.allocatedComponents || []), m.dispatchId || null
+            ]);
+          }
+        }
+
+        if (movements && Array.isArray(movements)) {
+          const movQuery = `
+            INSERT INTO movements (id, timestamp, type, comp_id, comp_name, qty, balance_after, reason, machine_ref, operator, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (id) DO UPDATE SET
+              timestamp = EXCLUDED.timestamp, type = EXCLUDED.type, comp_id = EXCLUDED.comp_id, comp_name = EXCLUDED.comp_name, qty = EXCLUDED.qty, balance_after = EXCLUDED.balance_after, reason = EXCLUDED.reason, machine_ref = EXCLUDED.machine_ref, operator = EXCLUDED.operator, notes = EXCLUDED.notes
+          `;
+          for (const m of movements) {
+            await client.query(movQuery, [
+              m.id, m.timestamp, m.type, m.compId, m.compName, m.qty, m.balanceAfter, m.reason, m.machineRef, m.operator, m.notes
+            ]);
+          }
+        }
+
+        if (dispatches && Array.isArray(dispatches)) {
+          const dispQuery = `
+            INSERT INTO dispatches (id, product, machine_serial, machine_model, dispatch_date, destination_name, destination_address, path_route, consignee_contact, transporter, tracking_waybill, operator, notes, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (id) DO UPDATE SET
+              product = EXCLUDED.product, machine_serial = EXCLUDED.machine_serial, machine_model = EXCLUDED.machine_model, dispatch_date = EXCLUDED.dispatch_date, destination_name = EXCLUDED.destination_name, destination_address = EXCLUDED.destination_address, path_route = EXCLUDED.path_route, consignee_contact = EXCLUDED.consignee_contact, transporter = EXCLUDED.transporter, tracking_waybill = EXCLUDED.tracking_waybill, operator = EXCLUDED.operator, notes = EXCLUDED.notes, timestamp = EXCLUDED.timestamp
+          `;
+          for (const d of dispatches) {
+            await client.query(dispQuery, [
+              d.id, d.product || 'SoilENZ', d.machineSerial, d.machineModel, d.dispatchDate, d.destinationName, d.destinationAddress, d.pathRoute, d.consigneeContact, d.transporter, d.trackingWaybill, d.operator, d.notes, d.timestamp
+            ]);
+          }
+        }
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } else if (activeDatabaseType === 'sqlite') {
+      if (components && Array.isArray(components)) {
+        const stmt = sqliteDb.prepare(`
+          INSERT OR REPLACE INTO components (
+            id, product, name, category, model, hsn, sku, link, price, purchaseDate, batch, qty, unit, qtyPerMachine, threshold, rack, vendorName, vendorPhone, vendorAddress, operator, notes, status, createdAt, updatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const c of components) {
+          stmt.run(
+            c.id, c.product || 'SoilENZ', c.name || '', c.category || '', c.model || '', c.hsn || '', c.sku || '', c.link || '',
+            Number(c.price) || 0, c.purchaseDate || '', c.batch || '', Number(c.qty) || 0, c.unit || 'Pcs',
+            Number(c.qtyPerMachine) || 1, Number(c.threshold) || 5, c.rack || '', c.vendorName || '',
+            c.vendorPhone || '', c.vendorAddress || '', c.operator || '', c.notes || '', c.status || 'In Stock',
+            c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
+          );
+        }
+      }
+
+      if (machines && Array.isArray(machines)) {
+        const stmt = sqliteDb.prepare(`
+          INSERT OR REPLACE INTO machines (id, product, serialNumber, model, status, registeredDate, allocatedComponents, dispatchId)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const m of machines) {
+          stmt.run(m.id, m.product || 'SoilENZ', m.serialNumber, m.model, m.status, m.registeredDate, JSON.stringify(m.allocatedComponents || []), m.dispatchId || null);
+        }
+      }
+
+      if (movements && Array.isArray(movements)) {
+        const stmt = sqliteDb.prepare(`
+          INSERT OR REPLACE INTO movements (id, timestamp, type, compId, compName, qty, balanceAfter, reason, machineRef, operator, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const m of movements) {
+          stmt.run(m.id, m.timestamp, m.type, m.compId, m.compName, m.qty, m.balanceAfter, m.reason, m.machineRef, m.operator, m.notes);
+        }
+      }
+
+      if (dispatches && Array.isArray(dispatches)) {
+        const stmt = sqliteDb.prepare(`
+          INSERT OR REPLACE INTO dispatches (id, product, machineSerial, machineModel, dispatchDate, destinationName, destinationAddress, pathRoute, consigneeContact, transporter, trackingWaybill, operator, notes, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const d of dispatches) {
+          stmt.run(d.id, d.product || 'SoilENZ', d.machineSerial, d.machineModel, d.dispatchDate, d.destinationName, d.destinationAddress, d.pathRoute, d.consigneeContact, d.transporter, d.trackingWaybill, d.operator, d.notes, d.timestamp);
+        }
+      }
+    } else {
+      if (components) memoryStore.components = components;
+      if (machines) memoryStore.machines = machines;
+      if (movements) memoryStore.movements = movements;
+      if (dispatches) memoryStore.dispatches = dispatches;
+      if (notifications) memoryStore.notifications = notifications;
+      persistJsonStore();
+    }
+  },
+
+  async deleteComponent(id) {
+    lastDataVersion = Date.now();
+    if (activeDatabaseType === 'neon-postgres') {
+      await pgPool.query('DELETE FROM components WHERE id = $1', [id]);
+    } else if (activeDatabaseType === 'sqlite') {
+      sqliteDb.prepare('DELETE FROM components WHERE id = ?').run(id);
+    } else {
+      memoryStore.components = memoryStore.components.filter(c => c.id !== id);
+      persistJsonStore();
+    }
+  },
+
+  async findUserByEmail(email) {
+    const normalized = (email || '').trim().toLowerCase();
+    if (activeDatabaseType === 'neon-postgres') {
+      const res = await pgPool.query('SELECT * FROM users WHERE LOWER(email) = $1', [normalized]);
+      return res.rows[0] || null;
+    } else if (activeDatabaseType === 'sqlite') {
+      const res = sqliteDb.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(normalized);
+      return res || null;
+    } else {
+      return memoryStore.users.find(u => u.email.toLowerCase() === normalized) || null;
+    }
+  },
+
+  async createUser(user) {
+    const id = 'USR-' + crypto.randomBytes(6).toString('hex').toUpperCase();
+    const newUser = {
+      id,
+      name: user.name.trim(),
+      email: user.email.trim().toLowerCase(),
+      password_hash: hashPassword(user.password),
+      role: user.role || 'operator',
+      created_at: new Date().toISOString()
+    };
+
+    if (activeDatabaseType === 'neon-postgres') {
+      await pgPool.query(
+        'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+        [newUser.id, newUser.name, newUser.email, newUser.password_hash, newUser.role, newUser.created_at]
+      );
+    } else if (activeDatabaseType === 'sqlite') {
+      sqliteDb.prepare(
+        'INSERT INTO users (id, name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(newUser.id, newUser.name, newUser.email, newUser.password_hash, newUser.role, newUser.created_at);
+    } else {
+      memoryStore.users.push(newUser);
+      persistJsonStore();
+    }
+
+    return {
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role
+    };
+  },
+
+  async getUserCount() {
+    if (activeDatabaseType === 'neon-postgres') {
+      const res = await pgPool.query('SELECT count(*)::int as count FROM users');
+      return res.rows[0].count;
+    } else if (activeDatabaseType === 'sqlite') {
+      const res = sqliteDb.prepare('SELECT count(*) as count FROM users').get();
+      return res ? res.count : 0;
+    } else {
+      return memoryStore.users.length;
+    }
+  }
+};
+
+// -------------------------------------------------------------
+// INITIALIZE DATABASE
+// -------------------------------------------------------------
+async function initializeDatabase() {
+  if (DATABASE_URL && (DATABASE_URL.startsWith('postgres://') || DATABASE_URL.startsWith('postgresql://'))) {
+    try {
+      console.log('[Database] Connecting to Neon Serverless PostgreSQL...');
+      await initNeonPostgres();
+      return;
+    } catch (err) {
+      console.error('[Database Error] Neon Postgres connection failed:', err.message);
+      console.log('[Database] Falling back to local storage engine...');
+    }
+  } else {
+    console.log('[Database] No DATABASE_URL provided. Using local database.');
+  }
+
+  // Fallback to SQLite
+  try {
+    initSqlite();
+    return;
+  } catch (err) {
+    console.warn('[Database] Native SQLite unavailable:', err.message);
+  }
+
+  // Fallback to JSON Store
+  initJsonStore();
+}
+
+// -------------------------------------------------------------
+// HTTP UTILITIES
 // -------------------------------------------------------------
 function sendJSON(res, statusCode, data) {
   res.writeHead(statusCode, {
@@ -337,8 +757,15 @@ function parseJSONBody(req) {
   });
 }
 
+function getAuthUser(req) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return null;
+  const token = authHeader.replace(/^Bearer\s+/i, '');
+  return verifyToken(token);
+}
+
 // -------------------------------------------------------------
-// HTTP SERVER & API ROUTES
+// HTTP REQUEST HANDLER
 // -------------------------------------------------------------
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -355,109 +782,134 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // --- API Endpoints ---
+  // ===========================================================
+  // API ROUTES
+  // ===========================================================
   if (pathname.startsWith('/api/')) {
     try {
-      if (pathname === '/api/health' && method === 'GET') {
+      // 1. HEALTH & REALTIME STATUS
+      if (pathname === '/api/health' || pathname === '/api/status') {
+        const all = await DataRepo.getAllData();
         return sendJSON(res, 200, {
           status: 'ok',
-          database: isSqlite ? 'sqlite' : 'json-store',
+          database: activeDatabaseType,
+          version: lastDataVersion,
+          counts: {
+            components: all.components.length,
+            machines: all.machines.length,
+            movements: all.movements.length,
+            dispatches: all.dispatches.length
+          },
           products: ['SoilENZ', 'Soil Sparsh', 'Soil Life', 'Others', 'Common'],
           timestamp: new Date().toISOString()
         });
       }
 
-      if (pathname === '/api/data' && method === 'GET') {
-        if (isSqlite) {
-          const components = db.prepare('SELECT * FROM components ORDER BY createdAt DESC').all();
-          const rawMachines = db.prepare('SELECT * FROM machines ORDER BY registeredDate DESC').all();
-          const machines = rawMachines.map(m => ({
-            ...m,
-            allocatedComponents: m.allocatedComponents ? JSON.parse(m.allocatedComponents) : []
-          }));
-          const movements = db.prepare('SELECT * FROM movements ORDER BY id ASC').all();
-          const dispatches = db.prepare('SELECT * FROM dispatches ORDER BY timestamp DESC').all();
-          const rawNotifs = db.prepare('SELECT * FROM notifications ORDER BY timestamp DESC').all();
-          const notifications = rawNotifs.map(n => ({ ...n, read: Boolean(n.read) }));
-          return sendJSON(res, 200, { components, machines, movements, dispatches, notifications });
-        } else {
-          return sendJSON(res, 200, jsonStore);
+      // 2. AUTH: REGISTER
+      if (pathname === '/api/auth/register' && method === 'POST') {
+        const body = await parseJSONBody(req);
+        const { name, email, password } = body;
+
+        if (!name || name.trim().length < 2) {
+          return sendJSON(res, 400, { error: 'Please enter a valid full name (at least 2 characters).' });
         }
+        if (!email || !email.includes('@') || !email.includes('.')) {
+          return sendJSON(res, 400, { error: 'Please enter a valid email address.' });
+        }
+        if (!password || password.length < 6) {
+          return sendJSON(res, 400, { error: 'Password must be at least 6 characters.' });
+        }
+
+        const existing = await DataRepo.findUserByEmail(email);
+        if (existing) {
+          return sendJSON(res, 409, { error: 'An account with this email already exists. Please log in.' });
+        }
+
+        const userCount = await DataRepo.getUserCount();
+        const role = userCount === 0 ? 'admin' : 'operator';
+
+        const createdUser = await DataRepo.createUser({ name, email, password, role });
+        return sendJSON(res, 201, {
+          success: true,
+          message: 'Account created successfully! You can now log in with your email and password.',
+          user: createdUser
+        });
       }
 
+      // 3. AUTH: LOGIN
+      if (pathname === '/api/auth/login' && method === 'POST') {
+        const body = await parseJSONBody(req);
+        const { email, password } = body;
+
+        if (!email || !password) {
+          return sendJSON(res, 400, { error: 'Email and password are required.' });
+        }
+
+        const user = await DataRepo.findUserByEmail(email);
+        if (!user || !verifyPassword(password, user.password_hash)) {
+          return sendJSON(res, 401, { error: 'Invalid email or password. Please try again.' });
+        }
+
+        const token = generateToken(user);
+        return sendJSON(res, 200, {
+          success: true,
+          token,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role
+          }
+        });
+      }
+
+      // 4. AUTH: CURRENT USER
+      if (pathname === '/api/auth/me' && method === 'GET') {
+        const auth = getAuthUser(req);
+        if (!auth) {
+          return sendJSON(res, 401, { error: 'Unauthenticated or session expired.' });
+        }
+        const user = await DataRepo.findUserByEmail(auth.email);
+        if (!user) {
+          return sendJSON(res, 404, { error: 'User not found.' });
+        }
+        return sendJSON(res, 200, {
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role
+          }
+        });
+      }
+
+      // 5. GET ALL DATA
+      if (pathname === '/api/data' && method === 'GET') {
+        const data = await DataRepo.getAllData();
+        return sendJSON(res, 200, {
+          ...data,
+          version: lastDataVersion,
+          database: activeDatabaseType
+        });
+      }
+
+      // 6. SAVE ALL DATA (SYNC)
       if (pathname === '/api/save-all' && method === 'POST') {
         const payload = await parseJSONBody(req);
-        const { components, machines, movements, dispatches, notifications } = payload;
-
-        if (isSqlite) {
-          if (components && Array.isArray(components)) {
-            const stmtComp = db.prepare(`
-              INSERT OR REPLACE INTO components (
-                id, product, name, category, model, hsn, sku, link, price, purchaseDate, batch, qty, unit, qtyPerMachine, threshold, rack, vendorName, vendorPhone, vendorAddress, operator, notes, status, createdAt, updatedAt
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            for (const c of components) {
-              stmtComp.run(
-                c.id, c.product || 'SoilENZ', c.name || '', c.category || '', c.model || '', c.hsn || '', c.sku || '', c.link || '',
-                Number(c.price) || 0, c.purchaseDate || '', c.batch || '', Number(c.qty) || 0, c.unit || 'Pcs',
-                Number(c.qtyPerMachine) || 1, Number(c.threshold) || 5, c.rack || '', c.vendorName || '',
-                c.vendorPhone || '', c.vendorAddress || '', c.operator || '', c.notes || '', c.status || 'In Stock',
-                c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()
-              );
-            }
-          }
-
-          if (machines && Array.isArray(machines)) {
-            const stmtMach = db.prepare(`
-              INSERT OR REPLACE INTO machines (id, product, serialNumber, model, status, registeredDate, allocatedComponents, dispatchId)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            for (const m of machines) {
-              stmtMach.run(m.id, m.product || 'SoilENZ', m.serialNumber, m.model, m.status, m.registeredDate, JSON.stringify(m.allocatedComponents || []), m.dispatchId || null);
-            }
-          }
-
-          if (movements && Array.isArray(movements)) {
-            const stmtMov = db.prepare(`
-              INSERT OR REPLACE INTO movements (id, timestamp, type, compId, compName, qty, balanceAfter, reason, machineRef, operator, notes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            for (const m of movements) {
-              stmtMov.run(m.id, m.timestamp, m.type, m.compId, m.compName, m.qty, m.balanceAfter, m.reason, m.machineRef, m.operator, m.notes);
-            }
-          }
-
-          if (dispatches && Array.isArray(dispatches)) {
-            const stmtDisp = db.prepare(`
-              INSERT OR REPLACE INTO dispatches (id, product, machineSerial, machineModel, dispatchDate, destinationName, destinationAddress, pathRoute, consigneeContact, transporter, trackingWaybill, operator, notes, timestamp)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `);
-            for (const d of dispatches) {
-              stmtDisp.run(d.id, d.product || 'SoilENZ', d.machineSerial, d.machineModel, d.dispatchDate, d.destinationName, d.destinationAddress, d.pathRoute, d.consigneeContact, d.transporter, d.trackingWaybill, d.operator, d.notes, d.timestamp);
-            }
-          }
-        } else {
-          // JSON store update
-          if (components) jsonStore.components = components;
-          if (machines) jsonStore.machines = machines;
-          if (movements) jsonStore.movements = movements;
-          if (dispatches) jsonStore.dispatches = dispatches;
-          if (notifications) jsonStore.notifications = notifications;
-          saveJsonStore();
-        }
-
-        return sendJSON(res, 200, { success: true, message: 'All tables synced successfully.', engine: isSqlite ? 'sqlite' : 'json' });
+        await DataRepo.saveAllData(payload);
+        return sendJSON(res, 200, {
+          success: true,
+          version: lastDataVersion,
+          database: activeDatabaseType,
+          message: 'All inventory data synchronized and stored permanently.'
+        });
       }
 
+      // 7. DELETE COMPONENT
       if (pathname.startsWith('/api/components/') && method === 'DELETE') {
         const id = pathname.replace('/api/components/', '');
-        if (isSqlite) {
-          db.prepare('DELETE FROM components WHERE id = ?').run(id);
-        } else {
-          jsonStore.components = jsonStore.components.filter(c => c.id !== id);
-          saveJsonStore();
-        }
-        return sendJSON(res, 200, { success: true, deleted: id });
+        await DataRepo.deleteComponent(id);
+        return sendJSON(res, 200, { success: true, deleted: id, version: lastDataVersion });
       }
 
       return sendJSON(res, 404, { error: 'API route not found' });
@@ -467,7 +919,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // --- Static Files ---
+  // ===========================================================
+  // STATIC FILES SERVING
+  // ===========================================================
   let filePath = path.join(__dirname, pathname === '/' ? 'index.html' : pathname);
 
   if (!filePath.startsWith(__dirname)) {
@@ -499,11 +953,19 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('================================================================');
-  console.log(' ArkaShine Innovations – 3 Products Inventory Portal Backend');
-  console.log(' Products: [SoilENZ, Soil Sparsh, Soil Life, Others, Common]');
-  console.log(` Server is running live at: http://0.0.0.0:${PORT}`);
-  console.log(` Active Database Engine: ${isSqlite ? 'Native SQLite' : 'JSON Persistent Store'}`);
-  console.log('================================================================');
-});
+// START SERVER
+(async () => {
+  await initializeDatabase();
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log('================================================================');
+    console.log(' ArkaShine Innovations – Multi-Product Portal Backend');
+    console.log(` Active Database Engine: [${activeDatabaseType.toUpperCase()}]`);
+    if (activeDatabaseType === 'neon-postgres') {
+      console.log(' Cloud Storage: Neon Serverless PostgreSQL (Permanent Persistence)');
+    }
+    console.log(` Server is running live at: http://0.0.0.0:${PORT}`);
+    console.log(' Real-time Sync & User Authentication Active');
+    console.log(' Clean State: Zero mock/dummy data.');
+    console.log('================================================================');
+  });
+})();

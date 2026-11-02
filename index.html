@@ -24,6 +24,17 @@
       </div>
     </div>
     <div class="header-actions">
+      <div id="realtime-status-pill" class="realtime-pill" title="Real-time synchronized with cloud database">
+        <i class="fas fa-circle"></i> <span>Live Sync</span>
+      </div>
+      <div id="user-profile-badge" class="user-pill" style="display:none;">
+        <i class="fas fa-user-circle"></i>
+        <span id="user-display-name">User</span>
+        <button class="btn-logout" onclick="logoutUser()" title="Sign Out"><i class="fas fa-sign-out-alt"></i></button>
+      </div>
+      <button id="btn-open-login" class="btn btn-outline btn-sm" onclick="openAuthModal('login')">
+        <i class="fas fa-user-lock"></i> Sign In
+      </button>
       <button id="btn-sound-toggle" class="btn-sound-toggle"><i class="fas fa-volume-up"></i> Sound: ON</button>
       <button class="notif-bell-btn" onclick="openModal('modal-notifications-center')">
         <i class="fas fa-bell"></i> Alerts
@@ -89,7 +100,6 @@
         <i class="fas fa-file-excel"></i> Download Excel (.xlsx)
       </button>
       <button class="btn btn-outline btn-sm" onclick="exportJSONBackup()"><i class="fas fa-download"></i> Backup JSON</button>
-      <button class="btn btn-outline btn-sm" onclick="openModal('modal-import-backup')"><i class="fas fa-upload"></i> Restore</button>
     </div>
   </nav>
 
@@ -803,23 +813,105 @@
   </div>
 </div>
 
-<!-- MODAL 8: RESTORE BACKUP -->
-<div id="modal-import-backup" class="modal-overlay">
-  <div class="modal-box" style="max-width:500px;">
-    <div class="modal-header">
-      <h3><i class="fas fa-upload" style="color:#15803d;"></i> Restore / Import Database</h3>
-      <button class="modal-close-btn" data-close-modal>&times;</button>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:0.86rem;color:#475569;margin-bottom:12px;">Select a previously exported JSON backup file to restore all inventory, machines, dispatches, and movements.</p>
-      <div class="form-group">
-        <label class="form-label">Choose Backup JSON File</label>
-        <input type="file" id="import-file-input" class="form-control" accept=".json">
+<!-- MODAL 8: USER AUTHENTICATION (SIGN IN & REGISTER) -->
+<div id="modal-auth" class="modal-overlay">
+  <div class="modal-box" style="max-width:440px;">
+    <div class="modal-header auth-modal-header" style="background:#f8fafc;padding:16px 20px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="brand-logo-icon" style="width:38px;height:38px;font-size:1.1rem;"><i class="fas fa-seedling"></i></div>
+        <div>
+          <h3 style="font-size:1.05rem;margin:0;color:#0f172a;" id="auth-modal-title">Sign In to ArkaShine</h3>
+          <p style="font-size:0.75rem;color:#64748b;margin:2px 0 0 0;">Internal Inventory &amp; Dispatch Hub</p>
+        </div>
       </div>
+      <button class="modal-close-btn" data-close-modal id="auth-modal-close" style="display:none;">&times;</button>
     </div>
-    <div class="modal-footer">
-      <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
-      <button type="button" class="btn btn-primary" onclick="handleImportFile()"><i class="fas fa-file-import"></i> Restore Data</button>
+
+    <!-- Auth Tabs Switcher -->
+    <div class="auth-tabs-nav">
+      <button type="button" class="auth-tab-btn active" id="tab-btn-login" onclick="switchAuthTab('login')">
+        <i class="fas fa-right-to-bracket"></i> Sign In
+      </button>
+      <button type="button" class="auth-tab-btn" id="tab-btn-register" onclick="switchAuthTab('register')">
+        <i class="fas fa-user-plus"></i> Create Account
+      </button>
+    </div>
+
+    <div class="modal-body" style="padding:22px 24px;">
+      <!-- Alerts Banner -->
+      <div id="auth-alert" class="auth-alert" style="display:none;"></div>
+
+      <!-- FORM 1: SIGN IN -->
+      <form id="form-login" onsubmit="handleLoginSubmit(event)">
+        <div class="form-group" style="margin-bottom:14px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Email Address <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="login-email" class="form-control with-icon" placeholder="name@example.com" required autocomplete="email">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Password <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="login-password" class="form-control with-icon" placeholder="Enter your password" required autocomplete="current-password">
+          </div>
+        </div>
+
+        <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width:100%;padding:10px;font-weight:700;margin-top:4px;">
+          <i class="fas fa-sign-in-alt"></i> Sign In to Dashboard
+        </button>
+
+        <div style="text-align:center;margin-top:16px;font-size:0.82rem;color:#64748b;">
+          Don't have an account yet? 
+          <a href="javascript:void(0)" onclick="switchAuthTab('register')" style="color:#15803d;font-weight:700;text-decoration:none;">Create an account</a>
+        </div>
+      </form>
+
+      <!-- FORM 2: CREATE ACCOUNT (REGISTER) -->
+      <form id="form-register" style="display:none;" onsubmit="handleRegisterSubmit(event)">
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Full Name <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-user input-icon"></i>
+            <input type="text" id="reg-name" class="form-control with-icon" placeholder="e.g. Akash or Arpita" required autocomplete="name">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Email Address <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-envelope input-icon"></i>
+            <input type="email" id="reg-email" class="form-control with-icon" placeholder="name@company.com" required autocomplete="email">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Password (Min. 6 chars) <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-lock input-icon"></i>
+            <input type="password" id="reg-password" class="form-control with-icon" placeholder="Create a secure password" minlength="6" required autocomplete="new-password">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label" style="font-weight:600;font-size:0.82rem;">Confirm Password <span class="required-star">*</span></label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-shield-halved input-icon"></i>
+            <input type="password" id="reg-confirm-password" class="form-control with-icon" placeholder="Confirm your password" minlength="6" required autocomplete="new-password">
+          </div>
+        </div>
+
+        <button type="submit" id="btn-register-submit" class="btn btn-primary" style="width:100%;padding:10px;font-weight:700;margin-top:4px;">
+          <i class="fas fa-user-check"></i> Register Account
+        </button>
+
+        <div style="text-align:center;margin-top:16px;font-size:0.82rem;color:#64748b;">
+          Already have an account? 
+          <a href="javascript:void(0)" onclick="switchAuthTab('login')" style="color:#15803d;font-weight:700;text-decoration:none;">Back to Sign In</a>
+        </div>
+      </form>
     </div>
   </div>
 </div>

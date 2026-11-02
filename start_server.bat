@@ -1,9 +1,10 @@
 @echo off
-title ArkaShine Innovations - SoilENZ Inventory Portal Server
+title ArkaShine Innovations - SoilENZ, Soil Sparsh & Soil Life Portal
 echo ===================================================================
-echo  Starting ArkaShine Innovations SoilENZ Dashboard & SQLite Server...
+echo  Starting ArkaShine Innovations Multi-Product Inventory Portal...
+echo  Supports: SoilENZ, Soil Sparsh, Soil Life, Others, Common Parts
 echo ===================================================================
 echo.
 cd /d "%~dp0"
-node server.js
+node --experimental-sqlite server.js
 pause
