@@ -696,7 +696,7 @@ const DataRepo = {
     }
   },
 
-  async cleanUsersLeavingAdmin() {
+  async cleanUsersLeavingAdmin(keepEmails = ['admin@arkashine.com', 'arpita@arkashine.in']) {
     const masterEmail = 'admin@arkashine.com';
     let master = await this.findUserByEmail(masterEmail);
     if (!master) {
@@ -706,7 +706,7 @@ const DataRepo = {
         password: 'Admin@ArkaShine2026',
         role: 'admin'
       });
-    } else if (master.role !== 'admin') {
+    } else {
       if (activeDatabaseType === 'neon-postgres') {
         await pgPool.query("UPDATE users SET role = 'admin' WHERE LOWER(email) = $1", [masterEmail]);
       } else if (activeDatabaseType === 'sqlite') {
@@ -717,20 +717,22 @@ const DataRepo = {
       }
     }
 
+    const lowerKeeps = keepEmails.map(e => e.trim().toLowerCase());
     let deletedEmails = [];
     if (activeDatabaseType === 'neon-postgres') {
       const res = await pgPool.query(
-        "DELETE FROM users WHERE LOWER(email) != $1 RETURNING email",
-        [masterEmail]
+        "DELETE FROM users WHERE LOWER(email) != ALL($1::text[]) RETURNING email",
+        [lowerKeeps]
       );
       deletedEmails = res.rows.map(r => r.email);
     } else if (activeDatabaseType === 'sqlite') {
-      const rows = sqliteDb.prepare("SELECT email FROM users WHERE LOWER(email) != ?").all(masterEmail);
-      sqliteDb.prepare("DELETE FROM users WHERE LOWER(email) != ?").run(masterEmail);
+      const placeholders = lowerKeeps.map(() => '?').join(',');
+      const rows = sqliteDb.prepare(`SELECT email FROM users WHERE LOWER(email) NOT IN (${placeholders})`).all(...lowerKeeps);
+      sqliteDb.prepare(`DELETE FROM users WHERE LOWER(email) NOT IN (${placeholders})`).run(...lowerKeeps);
       deletedEmails = rows.map(r => r.email);
     } else {
-      deletedEmails = memoryStore.users.filter(u => u.email.toLowerCase() !== masterEmail).map(u => u.email);
-      memoryStore.users = memoryStore.users.filter(u => u.email.toLowerCase() === masterEmail);
+      deletedEmails = memoryStore.users.filter(u => !lowerKeeps.includes(u.email.toLowerCase())).map(u => u.email);
+      memoryStore.users = memoryStore.users.filter(u => lowerKeeps.includes(u.email.toLowerCase()));
       persistJsonStore();
     }
 
@@ -1006,10 +1008,14 @@ const server = http.createServer(async (req, res) => {
 
       // 9. ADMIN: CLEAN USERS LEAVING ONLY ADMIN
       if (pathname === '/api/admin/clean-users' && method === 'POST') {
-        const result = await DataRepo.cleanUsersLeavingAdmin();
+        const body = await parseJSONBody(req).catch(() => ({}));
+        const keep = (Array.isArray(body.keepEmails) && body.keepEmails.length > 0)
+          ? body.keepEmails
+          : ['admin@arkashine.com', 'arpita@arkashine.in'];
+        const result = await DataRepo.cleanUsersLeavingAdmin(keep);
         return sendJSON(res, 200, {
           success: true,
-          message: 'All non-admin user accounts deleted. Master admin preserved.',
+          message: 'All non-admin user accounts deleted. Admin accounts preserved.',
           deletedCount: result.deletedEmails.length,
           deletedEmails: result.deletedEmails,
           remainingUsers: result.remaining
