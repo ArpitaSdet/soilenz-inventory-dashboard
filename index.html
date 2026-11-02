@@ -703,9 +703,12 @@
           <input type="date" id="edit-machine-date" class="form-control">
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline" data-close-modal>Cancel</button>
-        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+      <div class="modal-footer" style="display:flex;justify-content:space-between;align-items:center;">
+        <button type="button" class="btn btn-danger btn-sm" onclick="deleteCurrentEditMachine()"><i class="fas fa-trash"></i> Delete Machine</button>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn-outline btn-sm" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save Changes</button>
+        </div>
       </div>
     </form>
   </div>

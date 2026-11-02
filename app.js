@@ -1030,9 +1030,12 @@ function renderMachines() {
           Registered Date: <strong>${m.registeredDate || 'N/A'}</strong>
         </div>
 
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="editMachine('${m.serialNumber}')" title="Edit Machine Details & Status">
             <i class="fas fa-pencil"></i> Edit
+          </button>
+          <button class="btn btn-outline btn-sm" style="color:#b91c1c;border-color:#fca5a5;" onclick="deleteMachine('${m.serialNumber}')" title="Delete Machine Unit">
+            <i class="fas fa-trash"></i> Delete
           </button>
           ${canDispatch ? `
             <button class="btn btn-primary btn-sm" style="flex:1;" onclick="dispatchSpecificMachine('${m.serialNumber}')">
@@ -1047,6 +1050,46 @@ function renderMachines() {
       </div>
     `;
   }).join('');
+}
+
+// Delete registered machine
+async function deleteMachine(serialNumber) {
+  const machine = AppState.machines.find(m => m.serialNumber === serialNumber);
+  if (!machine) return;
+
+  if (!confirm(`Are you sure you want to delete machine unit "${machine.serialNumber}" (${machine.model})? This action cannot be undone.`)) {
+    return;
+  }
+
+  // 1. Immediately remove locally
+  AppState.machines = AppState.machines.filter(m => m.serialNumber !== serialNumber);
+  saveAllDataLocal();
+  renderAllViews();
+
+  // 2. Call server deletion endpoint
+  try {
+    await fetch(`${AppState.apiBase}/api/machines/${encodeURIComponent(serialNumber)}`, {
+      method: 'DELETE',
+      headers: {
+        ...(AppState.authToken ? { 'Authorization': `Bearer ${AppState.authToken}` } : {})
+      }
+    });
+  } catch (err) {
+    console.warn('Machine direct delete error:', err);
+  }
+
+  // 3. Full sync with server
+  await syncWithServer();
+  renderAllViews();
+  SoundFX.playSuccess();
+  showToast(`Machine unit "${serialNumber}" has been permanently deleted.`);
+}
+
+function deleteCurrentEditMachine() {
+  const origSerial = document.getElementById('edit-machine-orig-serial')?.value;
+  if (!origSerial) return;
+  closeModal('modal-edit-machine');
+  deleteMachine(origSerial);
 }
 
 // Edit registered machine
@@ -1515,16 +1558,29 @@ function editComponent(id) {
   openModal('modal-item-entry');
 }
 
-function deleteComponent(id) {
+async function deleteComponent(id) {
   const item = AppState.components.find(c => c.id === id);
   if (!item) return;
 
-  if (confirm(`Are you sure you want to delete "${item.name}" (${item.sku}) from inventory?`)) {
+  if (confirm(`Are you sure you want to delete "${item.name}" (${item.sku || item.id}) from inventory?`)) {
     AppState.components = AppState.components.filter(c => c.id !== id);
-    showToast(`Deleted "${item.name}".`, 'info');
     saveAllDataLocal();
-    syncWithServer();
     renderAllViews();
+
+    try {
+      await fetch(`${AppState.apiBase}/api/components/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: {
+          ...(AppState.authToken ? { 'Authorization': `Bearer ${AppState.authToken}` } : {})
+        }
+      });
+    } catch (e) {
+      console.warn('Direct delete component error:', e);
+    }
+
+    await syncWithServer();
+    renderAllViews();
+    showToast(`Deleted "${item.name}".`, 'info');
   }
 }
 

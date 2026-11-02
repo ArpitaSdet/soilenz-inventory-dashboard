@@ -502,6 +502,13 @@ const DataRepo = {
         await client.query('BEGIN');
 
         if (components && Array.isArray(components)) {
+          const compIds = components.map(c => c.id).filter(Boolean);
+          if (compIds.length > 0) {
+            await client.query('DELETE FROM components WHERE id != ALL($1::text[])', [compIds]);
+          } else {
+            await client.query('DELETE FROM components');
+          }
+
           const compQuery = `
             INSERT INTO components (
               id, product, name, category, model, hsn, sku, link, price, purchase_date, batch, qty, unit, qty_per_machine, threshold, rack, vendor_name, vendor_phone, vendor_address, operator, notes, status, created_at, updated_at
@@ -522,6 +529,13 @@ const DataRepo = {
         }
 
         if (machines && Array.isArray(machines)) {
+          const machIds = machines.map(m => m.id).filter(Boolean);
+          if (machIds.length > 0) {
+            await client.query('DELETE FROM machines WHERE id != ALL($1::text[])', [machIds]);
+          } else {
+            await client.query('DELETE FROM machines');
+          }
+
           const machQuery = `
             INSERT INTO machines (id, product, serial_number, model, status, registered_date, allocated_components, dispatch_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -572,6 +586,14 @@ const DataRepo = {
       }
     } else if (activeDatabaseType === 'sqlite') {
       if (components && Array.isArray(components)) {
+        const compIds = components.map(c => c.id).filter(Boolean);
+        if (compIds.length > 0) {
+          const placeholders = compIds.map(() => '?').join(',');
+          sqliteDb.prepare(`DELETE FROM components WHERE id NOT IN (${placeholders})`).run(...compIds);
+        } else {
+          sqliteDb.exec('DELETE FROM components');
+        }
+
         const stmt = sqliteDb.prepare(`
           INSERT OR REPLACE INTO components (
             id, product, name, category, model, hsn, sku, link, price, purchaseDate, batch, qty, unit, qtyPerMachine, threshold, rack, vendorName, vendorPhone, vendorAddress, operator, notes, status, createdAt, updatedAt
@@ -589,6 +611,14 @@ const DataRepo = {
       }
 
       if (machines && Array.isArray(machines)) {
+        const machIds = machines.map(m => m.id).filter(Boolean);
+        if (machIds.length > 0) {
+          const placeholders = machIds.map(() => '?').join(',');
+          sqliteDb.prepare(`DELETE FROM machines WHERE id NOT IN (${placeholders})`).run(...machIds);
+        } else {
+          sqliteDb.exec('DELETE FROM machines');
+        }
+
         const stmt = sqliteDb.prepare(`
           INSERT OR REPLACE INTO machines (id, product, serialNumber, model, status, registeredDate, allocatedComponents, dispatchId)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -635,6 +665,18 @@ const DataRepo = {
       sqliteDb.prepare('DELETE FROM components WHERE id = ?').run(id);
     } else {
       memoryStore.components = memoryStore.components.filter(c => c.id !== id);
+      persistJsonStore();
+    }
+  },
+
+  async deleteMachine(serialOrId) {
+    lastDataVersion = Date.now();
+    if (activeDatabaseType === 'neon-postgres') {
+      await pgPool.query('DELETE FROM machines WHERE serial_number = $1 OR id = $1', [serialOrId]);
+    } else if (activeDatabaseType === 'sqlite') {
+      sqliteDb.prepare('DELETE FROM machines WHERE serialNumber = ? OR id = ?').run(serialOrId, serialOrId);
+    } else {
+      memoryStore.machines = memoryStore.machines.filter(m => m.serialNumber !== serialOrId && m.id !== serialOrId);
       persistJsonStore();
     }
   },
@@ -991,9 +1033,16 @@ const server = http.createServer(async (req, res) => {
 
       // 7. DELETE COMPONENT
       if (pathname.startsWith('/api/components/') && method === 'DELETE') {
-        const id = pathname.replace('/api/components/', '');
+        const id = decodeURIComponent(pathname.replace('/api/components/', ''));
         await DataRepo.deleteComponent(id);
         return sendJSON(res, 200, { success: true, deleted: id, version: lastDataVersion });
+      }
+
+      // 7B. DELETE MACHINE
+      if (pathname.startsWith('/api/machines/') && method === 'DELETE') {
+        const serialOrId = decodeURIComponent(pathname.replace('/api/machines/', ''));
+        await DataRepo.deleteMachine(serialOrId);
+        return sendJSON(res, 200, { success: true, deleted: serialOrId, version: lastDataVersion });
       }
 
       // 8. ADMIN: LIST USERS
