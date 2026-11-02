@@ -681,6 +681,10 @@ function onMachineProductSelected() {
 // ==========================================================================
 function recalculateStatuses() {
   AppState.components.forEach(item => {
+    if (item.manualStatus && item.manualStatus !== 'AUTO') {
+      item.status = item.manualStatus;
+      return;
+    }
     const qty = Number(item.qty) || 0;
     const thresh = Number(item.threshold) || 0;
     if (qty <= 0) {
@@ -1261,6 +1265,7 @@ function openModal(id) {
     document.getElementById('entry-item-threshold').value = '5';
     document.getElementById('entry-item-unit').value = 'Pcs';
     document.getElementById('entry-item-qty').value = '0';
+    if (document.getElementById('entry-item-status')) document.getElementById('entry-item-status').value = 'AUTO';
 
     const defaultProd = (AppState.selectedProduct !== 'ALL') ? AppState.selectedProduct : 'SoilENZ';
     onProductRadioChange(defaultProd);
@@ -1340,6 +1345,7 @@ function submitItemEntry(e) {
   const vendorAddress = document.getElementById('entry-vendor-address').value.trim();
   const operator = document.getElementById('entry-item-operator').value.trim() || 'Store Incharge';
   const notes = document.getElementById('entry-item-notes').value.trim();
+  const manualStatus = document.getElementById('entry-item-status')?.value || 'AUTO';
 
   let item;
   if (editId) {
@@ -1365,6 +1371,7 @@ function submitItemEntry(e) {
     item.vendorPhone = vendorPhone;
     item.vendorAddress = vendorAddress;
     item.notes = notes;
+    item.manualStatus = manualStatus;
     item.updatedAt = new Date().toISOString();
 
     if (qty !== oldQty) {
@@ -1396,6 +1403,7 @@ function submitItemEntry(e) {
       vendorAddress,
       operator,
       notes,
+      manualStatus,
       createdAt: new Date().toISOString()
     };
     AppState.components.unshift(item);
@@ -1446,6 +1454,7 @@ function editComponent(id) {
   document.getElementById('entry-vendor-address').value = item.vendorAddress || '';
   document.getElementById('entry-item-operator').value = item.operator || 'Store Incharge';
   document.getElementById('entry-item-notes').value = item.notes || '';
+  if (document.getElementById('entry-item-status')) document.getElementById('entry-item-status').value = item.manualStatus || 'AUTO';
 
   openModal('modal-item-entry');
 }
