@@ -504,7 +504,7 @@ const DataRepo = {
         if (components && Array.isArray(components)) {
           const compIds = components.map(c => c.id).filter(Boolean);
           if (compIds.length > 0) {
-            await client.query('DELETE FROM components WHERE id != ALL($1::text[])', [compIds]);
+            await client.query('DELETE FROM components WHERE NOT (id = ANY($1::text[]))', [compIds]);
           } else {
             await client.query('DELETE FROM components');
           }
@@ -531,7 +531,7 @@ const DataRepo = {
         if (machines && Array.isArray(machines)) {
           const machIds = machines.map(m => m.id).filter(Boolean);
           if (machIds.length > 0) {
-            await client.query('DELETE FROM machines WHERE id != ALL($1::text[])', [machIds]);
+            await client.query('DELETE FROM machines WHERE NOT (id = ANY($1::text[]))', [machIds]);
           } else {
             await client.query('DELETE FROM machines');
           }
@@ -677,6 +677,18 @@ const DataRepo = {
       sqliteDb.prepare('DELETE FROM machines WHERE serialNumber = ? OR id = ?').run(serialOrId, serialOrId);
     } else {
       memoryStore.machines = memoryStore.machines.filter(m => m.serialNumber !== serialOrId && m.id !== serialOrId);
+      persistJsonStore();
+    }
+  },
+
+  async clearAllComponents() {
+    lastDataVersion = Date.now();
+    if (activeDatabaseType === 'neon-postgres') {
+      await pgPool.query('DELETE FROM components');
+    } else if (activeDatabaseType === 'sqlite') {
+      sqliteDb.exec('DELETE FROM components');
+    } else {
+      memoryStore.components = [];
       persistJsonStore();
     }
   },
@@ -1043,6 +1055,12 @@ const server = http.createServer(async (req, res) => {
         const serialOrId = decodeURIComponent(pathname.replace('/api/machines/', ''));
         await DataRepo.deleteMachine(serialOrId);
         return sendJSON(res, 200, { success: true, deleted: serialOrId, version: lastDataVersion });
+      }
+
+      // 7C. CLEAR ALL COMPONENTS
+      if (pathname === '/api/clear-all-components' && method === 'POST') {
+        await DataRepo.clearAllComponents();
+        return sendJSON(res, 200, { success: true, message: 'All components erased permanently.', version: lastDataVersion });
       }
 
       // 8. ADMIN: LIST USERS

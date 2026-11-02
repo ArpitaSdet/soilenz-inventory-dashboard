@@ -1635,6 +1635,12 @@ function viewComponentDetail(id) {
       editComponent(item.id);
     };
   }
+  const deleteBtn = document.getElementById('detail-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.onclick = () => {
+      deleteComponent(item.id);
+    };
+  }
 
   let badgeClass = 'badge-in-stock';
   if (item.status === 'Low Stock') badgeClass = 'badge-low-stock';
@@ -2246,32 +2252,43 @@ function parseExcelData(rawRows) {
 function confirmExcelImport() {
   if (!AppState.pendingExcelRows || AppState.pendingExcelRows.length === 0) return;
 
+  const importMode = document.querySelector('input[name="excel-import-mode"]:checked')?.value || 'replace';
   let addedCount = 0;
   let updatedCount = 0;
 
-  AppState.pendingExcelRows.forEach(imported => {
-    const existing = AppState.components.find(c =>
-      (c.sku && imported.sku && c.sku.toLowerCase() === imported.sku.toLowerCase()) ||
-      (c.name && imported.name && c.name.toLowerCase() === imported.name.toLowerCase())
-    );
-
-    if (existing) {
-      existing.qty = (Number(existing.qty) || 0) + (Number(imported.qty) || 0);
-      if (imported.product) existing.product = imported.product;
-      if (imported.category) existing.category = imported.category;
-      if (imported.price) existing.price = imported.price;
-      if (imported.rack) existing.rack = imported.rack;
-      if (imported.vendorName) existing.vendorName = imported.vendorName;
-      logMovement('IN', existing.id, existing.name, imported.qty, existing.qty, 'Excel Bulk Import Update', 'N/A', 'Excel Import', 'Stock merged from Excel');
-      updatedCount++;
-    } else {
-      AppState.components.push(imported);
+  if (importMode === 'replace') {
+    AppState.components = AppState.pendingExcelRows;
+    addedCount = AppState.pendingExcelRows.length;
+    AppState.pendingExcelRows.forEach(imported => {
       if (imported.qty > 0) {
-        logMovement('IN', imported.id, imported.name, imported.qty, imported.qty, 'Excel Bulk Import Initial', 'N/A', 'Excel Import', 'New component imported from Excel');
+        logMovement('IN', imported.id, imported.name, imported.qty, imported.qty, 'Excel Fresh Import', 'N/A', 'Excel Import', 'Initial inventory from Excel file');
       }
-      addedCount++;
-    }
-  });
+    });
+  } else {
+    AppState.pendingExcelRows.forEach(imported => {
+      const existing = AppState.components.find(c =>
+        (c.sku && imported.sku && c.sku.toLowerCase() === imported.sku.toLowerCase()) ||
+        (c.name && imported.name && c.name.toLowerCase() === imported.name.toLowerCase())
+      );
+
+      if (existing) {
+        existing.qty = (Number(existing.qty) || 0) + (Number(imported.qty) || 0);
+        if (imported.product) existing.product = imported.product;
+        if (imported.category) existing.category = imported.category;
+        if (imported.price) existing.price = imported.price;
+        if (imported.rack) existing.rack = imported.rack;
+        if (imported.vendorName) existing.vendorName = imported.vendorName;
+        logMovement('IN', existing.id, existing.name, imported.qty, existing.qty, 'Excel Bulk Import Update', 'N/A', 'Excel Import', 'Stock merged from Excel');
+        updatedCount++;
+      } else {
+        AppState.components.push(imported);
+        if (imported.qty > 0) {
+          logMovement('IN', imported.id, imported.name, imported.qty, imported.qty, 'Excel Bulk Import Initial', 'N/A', 'Excel Import', 'New component imported from Excel');
+        }
+        addedCount++;
+      }
+    });
+  }
 
   recalculateStatuses();
   populateCategoryFilter();
@@ -2289,7 +2306,53 @@ function confirmExcelImport() {
   const confirmBtn = document.getElementById('btn-confirm-excel-import');
   if (confirmBtn) confirmBtn.style.display = 'none';
 
-  showToast(`Successfully imported Excel inventory! (${addedCount} added, ${updatedCount} updated)`);
+  if (importMode === 'replace') {
+    showToast(`Replaced inventory with ${addedCount} components from Excel!`, 'success');
+  } else {
+    showToast(`Successfully imported Excel inventory! (${addedCount} added, ${updatedCount} updated)`, 'success');
+  }
+}
+
+function openEraseAllModal() {
+  const badge = document.getElementById('erase-count-badge');
+  if (badge) badge.textContent = AppState.components.length;
+  const input = document.getElementById('erase-confirm-input');
+  if (input) input.value = '';
+  openModal('modal-erase-all');
+}
+
+async function confirmEraseAllComponents() {
+  const input = document.getElementById('erase-confirm-input');
+  if (!input || input.value.trim().toUpperCase() !== 'ERASE') {
+    alert('Please type ERASE in capital letters to confirm wiping all inventory components.');
+    return;
+  }
+
+  closeModal('modal-erase-all');
+  const count = AppState.components.length;
+  AppState.components = [];
+
+  // 1. Immediately wipe local state & render empty state
+  saveAllDataLocal();
+  renderAllViews();
+
+  // 2. Call server clear endpoint
+  try {
+    await fetch(`${AppState.apiBase}/api/clear-all-components`, {
+      method: 'POST',
+      headers: {
+        ...(AppState.authToken ? { 'Authorization': `Bearer ${AppState.authToken}` } : {})
+      }
+    });
+  } catch (err) {
+    console.warn('Clear all endpoint error:', err);
+  }
+
+  // 3. Ensure server is 100% in sync
+  await syncWithServer();
+  renderAllViews();
+  SoundFX.playSuccess();
+  showToast(`Erased all ${count} components. Ready for fresh Excel upload or manual entry!`, 'info');
 }
 
 function downloadExcelTemplate() {

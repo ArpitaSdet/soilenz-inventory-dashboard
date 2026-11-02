@@ -750,6 +750,18 @@ body {
   padding: 10px 12px;
 }
 
+.btn-erase-all {
+  color: #b91c1c !important;
+  border-color: #fca5a5 !important;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+.btn-erase-all:hover {
+  background: #fee2e2 !important;
+  color: #991b1b !important;
+  border-color: #ef4444 !important;
+}
+
 .badge-category {
   background: var(--slate-100);
   color: var(--slate-700);
