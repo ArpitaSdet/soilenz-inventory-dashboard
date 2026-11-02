@@ -230,7 +230,7 @@
                 <th>Price (₹)</th>
                 <th>Stock / Qty / Unit</th>
                 <th>Qty/Machine</th>
-                <th>Status</th>
+                <th>Status <i class="fas fa-pen" style="font-size:0.65rem;color:#2563eb;" title="Click dropdown in any row to change status directly"></i></th>
                 <th>Vendor</th>
                 <th>Purchase Link</th>
                 <th>Date of Purchase</th>
@@ -485,15 +485,17 @@
               <input type="number" id="entry-item-threshold" class="form-control" value="5" min="0">
               <div class="form-hint">Triggers Low Stock when qty &le; this level.</div>
             </div>
-            <div class="form-group">
-              <label class="form-label">Stock Status</label>
-              <select id="entry-item-status" class="form-control">
-                <option value="AUTO">Auto (Calculate from Stock)</option>
-                <option value="In Stock">In Stock (Available)</option>
-                <option value="Low Stock">Low Stock (Needs Reorder)</option>
-                <option value="Out of Stock">Out of Stock (Depleted)</option>
+            <div class="form-group stock-status-highlight-box">
+              <label class="form-label" style="font-weight:700;color:#0f172a;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-sliders" style="color:#2563eb;"></i> Stock Status (Editable)
+              </label>
+              <select id="entry-item-status" class="form-control" style="font-weight:700;font-size:0.88rem;border-color:#2563eb;">
+                <option value="AUTO">⚙️ Auto-Calculate (from Qty &amp; Threshold)</option>
+                <option value="In Stock">🟢 In Stock (Available)</option>
+                <option value="Low Stock">🟡 Low Stock (Needs Reorder)</option>
+                <option value="Out of Stock">🔴 Out of Stock (Depleted)</option>
               </select>
-              <div class="form-hint">Manual override or auto-calculate.</div>
+              <div class="form-hint" style="color:#2563eb;font-weight:600;">Choose a manual override or Auto.</div>
             </div>
             <div class="form-group">
               <label class="form-label">Storage Rack / Bin Location</label>

@@ -732,6 +732,62 @@ function updateKPIs() {
 }
 
 // ==========================================================================
+// STATUS SELECTOR & QUICK STATUS EDIT (DIRECT IN-TABLE & CARDS)
+// ==========================================================================
+function getStatusDropdownHTML(item) {
+  let badgeClass = 'badge-in-stock';
+  if (item.status === 'Low Stock') badgeClass = 'badge-low-stock';
+  if (item.status === 'Out of Stock') badgeClass = 'badge-out-of-stock';
+
+  const isAuto = !item.manualStatus || item.manualStatus === 'AUTO';
+  const isManualIn = item.manualStatus === 'In Stock';
+  const isManualLow = item.manualStatus === 'Low Stock';
+  const isManualOut = item.manualStatus === 'Out of Stock';
+
+  return `
+    <select class="status-quick-select ${badgeClass}" onchange="quickUpdateStockStatus('${item.id}', this.value)" title="Click to edit status: In Stock, Low Stock, or Out of Stock">
+      <option value="In Stock" ${isManualIn || (isAuto && item.status === 'In Stock') ? 'selected' : ''}>🟢 In Stock</option>
+      <option value="Low Stock" ${isManualLow || (isAuto && item.status === 'Low Stock') ? 'selected' : ''}>🟡 Low Stock</option>
+      <option value="Out of Stock" ${isManualOut || (isAuto && item.status === 'Out of Stock') ? 'selected' : ''}>🔴 Out of Stock</option>
+      <option value="AUTO" ${isAuto ? 'selected' : ''}>⚙️ Auto-Calculate</option>
+    </select>
+  `;
+}
+
+function quickUpdateStockStatus(id, newStatus) {
+  const item = AppState.components.find(c => c.id === id);
+  if (!item) return;
+
+  if (newStatus === 'AUTO') {
+    delete item.manualStatus;
+    const qty = Number(item.qty) || 0;
+    const thresh = Number(item.threshold) || 0;
+    if (qty <= 0) {
+      item.status = 'Out of Stock';
+    } else if (qty <= thresh) {
+      item.status = 'Low Stock';
+    } else {
+      item.status = 'In Stock';
+    }
+    showToast(`Status for "${item.name}" set to Auto-calculate (${item.status})`);
+  } else {
+    item.manualStatus = newStatus;
+    item.status = newStatus;
+    showToast(`Status for "${item.name}" set to "${newStatus}"`);
+  }
+
+  SoundFX.playSuccess();
+  saveAllDataLocal();
+  syncWithServer();
+  renderAllViews();
+
+  const detailModal = document.getElementById('modal-component-detail');
+  if (detailModal && detailModal.classList.contains('active')) {
+    viewComponentDetail(id);
+  }
+}
+
+// ==========================================================================
 // RENDER COMPONENT INVENTORY (TABLE & CARDS)
 // ==========================================================================
 function renderInventory() {
@@ -813,7 +869,7 @@ function renderInventory() {
             <div style="font-size:0.68rem;color:#94a3b8;">Min: ${item.threshold || 0}</div>
           </td>
           <td style="text-align:center;">${item.qtyPerMachine || 1}</td>
-          <td><span class="badge ${badgeClass}"><i class="fas fa-circle" style="font-size:0.45rem;"></i> ${item.status}</span></td>
+          <td>${getStatusDropdownHTML(item)}</td>
           <td>${escapeHTML(item.vendorName || '—')}</td>
           <td style="text-align:center;">${linkBtn}</td>
           <td>${escapeHTML(item.purchaseDate || '—')}</td>
@@ -862,7 +918,7 @@ function renderInventory() {
                 ${prodBadge}
                 <span class="badge badge-category">${escapeHTML(item.category)}</span>
               </div>
-              <span class="badge ${badgeClass}">${item.status}</span>
+              ${getStatusDropdownHTML(item)}
             </div>
             <div class="comp-card-name">${escapeHTML(item.name)}</div>
             <div class="comp-card-meta">
@@ -1497,10 +1553,13 @@ function viewComponentDetail(id) {
   if (bodyEl) {
     bodyEl.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap;gap:8px;">
-        <div style="display:flex;align-items:center;gap:6px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           ${prodBadge}
           <span class="badge badge-category">${escapeHTML(item.category)}</span>
-          <span class="badge ${badgeClass}">${item.status}</span>
+          <div style="display:inline-flex;align-items:center;gap:6px;">
+            <span style="font-size:0.75rem;font-weight:700;color:#64748b;">Status:</span>
+            ${getStatusDropdownHTML(item)}
+          </div>
         </div>
         <div style="font-size:1.25rem;font-weight:800;color:#15803d;">
           ${item.price ? `â‚¹${Number(item.price).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'Price not set'}
